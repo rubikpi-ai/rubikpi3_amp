@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Copyright (c) 2024 Linaro Ltd.
+ */
+/ {
+	/* When running as the primary bootloader there is no prior
+	 * stage to populate the memory layout for us. We *should*
+	 * have two nodes here, but ABL does NOT like that.
+	 * sooo we're stuck with this.
+	 */
+	memory@80000000 {
+		device_type = "memory";
+
+		reg = <0x00 0x80600000 0x00 0x100000
+		       0x00 0x80880000 0x00 0x4000
+			   0x00 0x80894000 0x00 0x6b000
+			   0x00 0x81800000 0x00 0x2b00000
+			   0x00 0x8b31c000 0x00 0x3fe000
+			   0x00 0x8b71c000 0x00 0xe4000
+			   0x00 0x9ae00000 0x00 0x1e900000
+			   0x00 0xc3400000 0x00 0xd200000
+			   0x00 0xd0700000 0x00 0xaf900000
+			   0x01 0x80000000 0x01 0x00>;
+	};
+};
+
+&pcie0 {
+	status = "disabled";
+};
+
+&pcie0_phy {
+	status = "disabled";
+};
+
+&pcie1 {
+	status = "disabled";
+};
+
+&pcie1_phy {
+	status = "disabled";
+};
+
+&i2c1 {
+	status = "disabled";
+};
+
+&i2c9 {
+	status = "disabled";
+};
+
+&spi12 {
+	status = "disabled";
+};
+
+&uart2 {
+	status = "disabled";
+};
+
+&uart7 {
+	status = "disabled";
+};
