@@ -25,14 +25,20 @@ SECTIONS
 	{
 		*(.data)
 	}
+	. = ALIGN(4096);
+	idmap_pg_dir = .;
+	. += 3*4096;
+	idmap_pg_end = .;
+	init_pg_dir = .;
+	. += 3*4096;
+	init_pg_end = .;
+	swapper_pg_dir = .;
+	. += 4096;
 	_edata = .;
 
 	. = ALIGN(0x8);
 	_bss = .;
 	.bss : { *(.bss*) }
 	_ebss = .;
-
-	. = ALIGN(4096);
-	init_pg_dir = .;
-	. += 4096;
+	_end = .;
 }

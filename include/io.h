@@ -1,11 +1,10 @@
+
 #ifndef _P_IO_H
 #define _P_BASE_H
 
-#include <asm/mm.h>
-
 #if 1
-#define __arch_getl(a)	(*(volatile unsigned int *)(VA_START + (a)))
-#define __arch_putl(v, a) (*(volatile unsigned int *)(VA_START + (a)) = (v))
+#define __arch_getl(a)			(*(volatile unsigned int *)(a))
+#define __arch_putl(v,a)		(*(volatile unsigned int *)(a) = (v))
 
 #define dmb()		__asm__ __volatile__ ("" : : : "memory")
 #define __iormb()	dmb()
@@ -16,12 +15,12 @@
 #else
 static inline void writel(unsigned int value, unsigned int addr)
 {
-	*(volatile unsigned int *)(VA_START + addr) = value;
+	*(volatile unsigned int *)addr = value;
 }
 
 static inline unsigned int readl(unsigned int addr)
 {
-	return *(volatile unsigned int *)(VA_START+addr);
+	return *(volatile unsigned int *)addr;
 }
 #endif
 

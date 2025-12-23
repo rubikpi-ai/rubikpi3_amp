@@ -1,6 +1,6 @@
-#include "mm.h"
-#include <asm/base.h>
+#include <mm.h>
 #include <asm/sysregs.h>
+#include <asm/pgtable_prot.h>
 
 .section ".text.boot"
 
@@ -35,7 +35,6 @@ _start:
 
 
 	b proc_hang
-#if 0
 	b master
 
 master:
@@ -90,18 +89,15 @@ el2_entry:
 	eret
 
 el1_entry:
-	/* 设置异常向量表基地址到vbar寄存器 */
-	ldr     x5, =vectors
-	msr     vbar_el1, x5
-	isb
 
-	adr x0, bss_begin
-	adr x1, bss_end
+	adr x0, _bss
+	adr x1, _bss
 	sub x1, x1, x0
 	bl memzero
 
 	/* 创建页表 */
 	bl create_page_table
+#if 0
 	/* 打开MMU*/
 	bl enable_mmu
 
@@ -116,3 +112,134 @@ el1_entry:
 
 proc_hang:
 	b 	proc_hang
+
+create_page_table:
+	mov x25, x30
+
+	/*1. create identical mapping
+
+	  创建恒等映射，即虚拟地址等于物理地址
+	  这里把内核image都建立恒等映射
+	 */
+	adrp  x0, idmap_pg_dir
+	adrp  x1, idmap_pg_end
+	sub x1, x1, x0
+	bl memzero
+
+	/* create idmap mapping */
+	adrp x1, _text_boot
+	and x1, x1, SECTION_MASK
+	mov x2, x1
+	adrp x3,  _end
+	add x3, x3, #SECTION_SIZE
+	sub x3, x3, #1
+	and x3, x3, SECTION_MASK
+	mov x4, SWAPPER_MM_MMUFLAGS
+	adrp  x0, idmap_pg_dir
+
+	bl __create_section_mapping
+
+	/*2. map to link addr
+
+	  把内核image映射到链接地址
+	  链接地址为0xffff000010080000
+	  在跳转到C语言之前需要把重定位到链接地址
+	 */
+	adrp  x0, init_pg_dir
+	adrp  x1, init_pg_end
+	sub x1, x1, x0
+	bl memzero
+
+	/* adrp得到了_text_boot的物理地址*/
+	adrp x1, _text_boot
+	and x1, x1, SECTION_MASK
+	/* ldr加载了_text_boot的链接地址*/
+	ldr x2, =_text_boot
+	ldr x3, =_end
+	add x3, x3, #SECTION_SIZE
+	sub x3, x3, #1
+	and x3, x3, SECTION_MASK
+	mov x4, SWAPPER_MM_MMUFLAGS
+	adrp  x0, init_pg_dir
+
+	bl __create_section_mapping
+
+	mov x30, x25
+	ret
+
+/*
+   创建段映射的页表（2MB大小的section）
+
+   x0: page table base address
+   x1: phys address
+   x2: virt start address
+   x3: virt end address
+   x4: prot
+ */
+__create_section_mapping:
+	mov x12, x30
+
+	/*
+	   第一步： 根据vaddr来找pgd索引，vaddr >> 39
+	   结果保存到x8寄存器
+	 */
+	lsr x8, x2, #PGDIR_SHIFT
+	and x8, x8, #PTRS_PER_PGD - 1
+
+	/*
+	   第二步： 把pud页表基地址来做成一个pgd页表项
+	   填充到刚才找到的pgd表项中
+
+	   x0指向： pgd页表的基地址
+	   x0+PAGE_SIZE： 指向PUD页表的基地址
+	   x0+2*PAGE_SIZE: 指向PMD页表的基地址
+	 */
+	add x9, x0, #PAGE_SIZE
+	orr x9, x9, #PUD_TYPE_TABLE
+	str x9, [x0, x8, lsl #3] // fill pgd entry
+
+	add x0, x0, #PAGE_SIZE
+
+	/*
+	   第三步： 根据需要vaddr来找pud索引，vaddr >> 30
+	 */
+	lsr x8, x2, #PUD_SHIFT
+	and x8, x8, #PTRS_PER_PUD - 1
+
+	/*
+	   第4步： 把pud页表基地址来做成一个pud页表项
+	   填充到刚才找到的pud表项中
+	 */
+	add x9, x0, #PAGE_SIZE
+	orr x9, x9, #PUD_TYPE_TABLE
+	str x9, [x0, x8, lsl #3] // fill pud entry
+	add x0, x0, #PAGE_SIZE
+
+	/*
+	   第5步：
+	   根据vaddr来找到pmd索引，然后找到pmd表项
+	   由物理地址来构建一个pmd页表项
+	   然后填充到pmd表项里
+	 */
+1:
+	lsr x8, x2, #PMD_SHIFT
+	and x8, x8, #PTRS_PER_PMD - 1
+	lsr x10, x1, #SECTION_SHIFT
+	mov x9, x4
+	orr x10, x9, x10, lsl #SECTION_SHIFT
+	str x10, [x0, x8, lsl #3]
+
+	add x2, x2, #PMD_SIZE  //next
+	add x1, x1, #PMD_SIZE  //phy
+
+	cmp x3, x2
+	b.hi 1b
+
+	mov x30, x12
+	ret
+
+.globl idmap_replace_ttbr1
+idmap_replace_ttbr1:
+	msr     ttbr1_el1, x0
+	isb
+	ret
