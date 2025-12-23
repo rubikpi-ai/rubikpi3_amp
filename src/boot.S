@@ -13,6 +13,24 @@ _start:
 	str x1, [x0]
 
 
+	ldr x2, =0x0F12C000
+	ldr w1, [x2]
+	ldr x0, =0xD1000010
+	str w1, [x0]
+
+	/* out put */
+	ldr x2, =0x0F12C004
+	ldr w3, [x2]
+	mov w4, #1
+	orr w3, w3, w4, lsl #1
+	str w3, [x2]
+
+	ldr x2, =0x0F12C000
+	ldr w3, [x2]
+	mov w4, #1
+	mov x3, xzr
+	orr w3, w3, w4, lsl #9
+	str w3, [x2]
 
 
 
