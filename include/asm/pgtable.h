@@ -3,11 +3,10 @@
 
 #include <asm/pgtable_hwdef.h>
 #include <asm/pgtable_types.h>
-#include <asm/mm.h>
+#include <mm.h>
 #include <asm/barrier.h>
 
 extern char idmap_pg_dir[];
-extern char swapper_pg_dir[];
 extern char init_pg_dir[];
 
 /* 查找PGD索引 */

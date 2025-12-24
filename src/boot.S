@@ -8,33 +8,6 @@
 
 .globl _start
 _start:
-	ldr x0, =SHM_BASE
-	ldr x1, =0x4350553743505537
-	str x1, [x0]
-
-
-	ldr x2, =0x0F12C000
-	ldr w1, [x2]
-	ldr x0, =0xD1000010
-	str w1, [x0]
-
-	/* out put */
-	ldr x2, =0x0F12C004
-	ldr w3, [x2]
-	mov w4, #1
-	orr w3, w3, w4, lsl #1
-	str w3, [x2]
-
-	ldr x2, =0x0F12C000
-	ldr w3, [x2]
-	mov w4, #1
-	mov x3, xzr
-	orr w3, w3, w4, lsl #9
-	str w3, [x2]
-
-
-
-	b proc_hang
 	b master
 
 master:
@@ -95,9 +68,42 @@ el1_entry:
 	sub x1, x1, x0
 	bl memzero
 
+#if 0
+	ldr x0, =SHM_BASE
+	ldr x1, =0x4350553743505537
+	str x1, [x0]
+
+
+	ldr x2, =0x0F12C000
+	ldr w1, [x2]
+	ldr x0, =0xD1000010
+	str w1, [x0]
+
+	/* out put */
+	ldr x2, =0x0F12C004
+	ldr w3, [x2]
+	mov w4, #1
+	orr w3, w3, w4, lsl #1
+	str w3, [x2]
+
+	ldr x2, =0x0F12C000
+	ldr w3, [x2]
+	mov w4, #1
+	mov x3, xzr
+	orr w3, w3, w4, lsl #9
+	str w3, [x2]
+
+#endif
+
+
+	ldr x0, =_stack_top
+	mov	sp, x0
+	bl	kernel_main
+	b proc_hang
+
+#if 0
 	/* 创建页表 */
 	bl create_page_table
-#if 0
 	/* 打开MMU*/
 	bl enable_mmu
 
@@ -241,5 +247,70 @@ __create_section_mapping:
 .globl idmap_replace_ttbr1
 idmap_replace_ttbr1:
 	msr     ttbr1_el1, x0
+	isb
+	ret
+
+enable_mmu:
+	tlbi	vmalle1	// Invalidate local TLB
+	dsb	nsh
+
+	/*
+	  设置MAIR寄存器，用来配置内存属性
+	  在页表项中用来设置内存属性
+	 */
+	ldr	x5, =MAIR(0x00, MT_DEVICE_nGnRnE) | \
+		     MAIR(0x04, MT_DEVICE_nGnRE) | \
+		     MAIR(0x0c, MT_DEVICE_GRE) | \
+		     MAIR(0x44, MT_NORMAL_NC) | \
+		     MAIR(0xff, MT_NORMAL) | \
+		     MAIR(0xbb, MT_NORMAL_WT)
+	msr	mair_el1, x5
+
+	/*
+	   这种TCR寄存器，主要设置
+	   1. T0SZ： TTBR0页表的管辖大小
+	   2. T1SZ： TTBR1页表管辖大小
+	   3. TCR_TG0_4K： TTBR0的页表粒度为4KB
+	   4. TCR_TG1_4K： TTBR1的页表粒度为4KB
+	   5. TCR_SH0_INNER/TCR_SH1_INNER: 设置为inner share类型
+	   6. TCR_IRGN_WBWA: 设置cache为Write-Back
+	   	Write-Allocate Cacheable
+	 */
+	ldr	x10, =TCR_TxSZ(VA_BITS) | TCR_TG_FLAGS | \
+				TCR_SHARED | TCR_CACHE_FLAGS
+	msr	tcr_el1, x10
+
+	/*
+	   SCTLR_ELx_M: 打开MMU
+	   SCTLR_ELx_C: 打开全局的data cache功能
+	   SCTLR_ELx_I: 打开全局的指令cache功能
+
+	   不打开cache，ldxr指令访问noncache的地址会触发
+	   Dabort异常
+	 */
+	ldr x3, =SCTLR_ELx_M | SCTLR_ELx_C | SCTLR_ELx_I
+
+	/*
+	   加载两个页表的物理地址
+	   恒等映射页表： idmap_pg_dir
+	   内核空间映射页表： init_pg_dir
+	 */
+	adrp x0, idmap_pg_dir
+	adrp x1, init_pg_dir
+	msr ttbr0_el1, x0
+	msr ttbr1_el1, x1
+	isb
+
+	/*
+	   打开MMU
+	 */
+	msr sctlr_el1, x3
+	isb
+
+	/*
+	   无效所有的指令高速缓存
+	 */
+	ic iallu
+	dsb nsh
 	isb
 	ret

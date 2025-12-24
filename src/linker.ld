@@ -34,11 +34,15 @@ SECTIONS
 	init_pg_end = .;
 	swapper_pg_dir = .;
 	. += 4096;
+
 	_edata = .;
 
 	. = ALIGN(0x8);
 	_bss = .;
 	.bss : { *(.bss*) }
 	_ebss = .;
+
 	_end = .;
+
+	_stack_top = 0xd1000000;
 }

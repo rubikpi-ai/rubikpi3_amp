@@ -85,7 +85,7 @@
 #define MT_NORMAL_WT		5
 
 
-
+#define MAIR(attr, mt)	((attr) << ((mt) * 8))
 
 
 
