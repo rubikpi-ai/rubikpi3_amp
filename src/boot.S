@@ -4,8 +4,6 @@
 
 .section ".text.boot"
 
-.equ SHM_BASE, 0xD1000000
-
 .globl _start
 _start:
 	b master
@@ -61,40 +59,60 @@ el2_entry:
 
 	eret
 
-el1_entry:
+.align 11
+.global vectors
+vectors:
+    /* current EL, SP0: sync/irq/fiq/serr */
+    b sync_cur_sp0
+    b .
+    b .
+    b .
+    /* current EL, SPx */
+    b sync_cur_spx
+    b .
+    b .
+    b .
+    /* lower EL, AArch64 */
+    b .
+    b .
+    b .
+    b .
+    /* lower EL, AArch32 */
+    b .
+    b .
+    b .
+    b .
 
+sync_cur_sp0:
+sync_cur_spx:
+    ldr x0, =_shared_memory
+    mrs x1, esr_el1
+    mrs x2, far_el1
+    mrs x3, elr_el1
+    str x1, [x0]        /* ESR */
+    str x2, [x0, #8]    /* FAR */
+    str x3, [x0, #16]   /* ELR */
+1:  b 1b
+
+el1_entry:
 	adr x0, _bss
-	adr x1, _bss
+	adr x1, _ebss
 	sub x1, x1, x0
 	bl memzero
 
-#if 0
-	ldr x0, =SHM_BASE
-	ldr x1, =0x4350553743505537
-	str x1, [x0]
+	ldr x0, =_heap_start
+	ldr x1, =_heap_end
+	sub x1, x1, x0
+	bl memzero
 
+	ldr x0, =_shared_memory
+	ldr x1, =_stack_bottom
+	sub x1, x1, x0
+	bl memzero
 
-	ldr x2, =0x0F12C000
-	ldr w1, [x2]
-	ldr x0, =0xD1000010
-	str w1, [x0]
-
-	/* out put */
-	ldr x2, =0x0F12C004
-	ldr w3, [x2]
-	mov w4, #1
-	orr w3, w3, w4, lsl #1
-	str w3, [x2]
-
-	ldr x2, =0x0F12C000
-	ldr w3, [x2]
-	mov w4, #1
-	mov x3, xzr
-	orr w3, w3, w4, lsl #9
-	str w3, [x2]
-
-#endif
-
+//	ldr x0, =vectors
+//	msr vbar_el1, x0
+//	isb
 
 	ldr x0, =_stack_top
 	mov	sp, x0

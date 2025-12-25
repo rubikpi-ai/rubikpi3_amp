@@ -3,7 +3,7 @@
 
 #include <type.h>
 
-#define TOTAL_MEMORY (SZ_1G)
+#define TOTAL_MEMORY (128 * SZ_1M)
 
 #define PAGE_SHIFT 12
 
@@ -84,10 +84,12 @@
 #define MT_NORMAL		4
 #define MT_NORMAL_WT		5
 
-
 #define MAIR(attr, mt)	((attr) << ((mt) * 8))
 
-
+/* to align the pointer to the (next) page boundary */
+#define PAGE_ALIGN(addr) (((addr)+PAGE_SIZE-1)&PAGE_MASK)
+#define PAGE_ALIGN_UP(addr)  PAGE_ALIGN(addr)
+#define PAGE_ALIGN_DOWN(addr) (addr & PAGE_MASK)
 
 #ifndef __ASSEMBLER__
 

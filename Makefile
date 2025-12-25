@@ -9,7 +9,7 @@ SRC_DIR = src
 all : rubikpi3_amp.bin
 
 clean :
-	rm -rf $(BUILD_DIR) *.bin
+	rm -rf $(BUILD_DIR) *.bin *.map
 
 $(BUILD_DIR)/%_c.o: $(SRC_DIR)/%.c
 	mkdir -p $(@D)
@@ -28,6 +28,6 @@ DEP_FILES = $(OBJ_FILES:%.o=%.d)
 
 rubikpi3_amp.bin: $(SRC_DIR)/linker.ld $(OBJ_FILES)
 	$(ARMGNU)-ld -T $(SRC_DIR)/linker.ld \
-		-Map $(BUILD_DIR)/rubikpi3_amp.map --cref --print-memory-usage \
+		-Map rubikpi3_amp.map --cref --print-memory-usage \
 		-o $(BUILD_DIR)/rubikpi3_amp.elf $(OBJ_FILES) -e _start
 	$(ARMGNU)-objcopy $(BUILD_DIR)/rubikpi3_amp.elf -O binary rubikpi3_amp.bin

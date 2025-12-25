@@ -1,6 +1,6 @@
 SECTIONS
 {
-	. = 0xd0000000,
+	. = 0xd0800000;
 
 	_text_boot = .;
 	.text.boot : { *(.text.boot) }
@@ -41,8 +41,15 @@ SECTIONS
 	_bss = .;
 	.bss : { *(.bss*) }
 	_ebss = .;
-
 	_end = .;
 
-	_stack_top = 0xd1000000;
+	_heap_start = .;
+	. = 0xD7C00000;
+	_heap_end = .;
+
+	_shared_memory = .;
+	. = 0xD8000000;
+	_stack_bottom = .;
+	. = 0xd8800000;
+	_stack_top = .;
 }
