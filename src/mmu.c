@@ -5,6 +5,7 @@
 #include <asm/barrier.h>
 #include <string.h>
 #include <asm/base.h>
+#include <page_alloc.h>
 
 #define NO_BLOCK_MAPPINGS BIT(0)
 #define NO_CONT_MAPPINGS BIT(1)
@@ -13,6 +14,7 @@ extern char idmap_pg_dir[];
 
 extern char _text_boot[], _etext_boot[];
 extern char _text[], _etext[];
+extern char _stack_top[];
 
 extern char _shared_memory[];
 
@@ -56,11 +58,9 @@ static void alloc_init_pmd(pud_t *pudp, unsigned long addr,
 		unsigned long (*alloc_pgtable)(void),
 		unsigned long flags)
 {
-	unsigned long *SHM_BASE = _shared_memory;
 	pud_t pud = *pudp;
 	pmd_t *pmdp;
 	unsigned long next;
-	//*SHM_BASE = 0xAAAAAAA4;
 
 	if (pud_none(pud)) {
 		unsigned long pmd_phys;
@@ -91,25 +91,19 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr,
 		unsigned long (*alloc_pgtable)(void),
 		unsigned long flags)
 {
-	unsigned long *SHM_BASE = _shared_memory;
 	pgd_t pgd = *pgdp;
 	pud_t *pudp;
 	unsigned long next;
 
-	//*SHM_BASE = 0xAAAAAAA0;
-
 	if (pgd_none(pgd)) {
 		unsigned long pud_phys;
 
-		//*SHM_BASE = 0xAAAAAAA1;
 		pud_phys = alloc_pgtable();
-		*SHM_BASE = 0xAAAAAAA2;
 
 		set_pgd(pgdp, __pgd(pud_phys | PUD_TYPE_TABLE));
 		pgd = *pgdp;
 	}
 
-	//*SHM_BASE = 0xAAAAAAA3;
 	pudp = pud_offset_phys(pgdp, addr);
 	do {
 		next = pud_addr_end(addr, end);
@@ -126,10 +120,6 @@ static void __create_pgd_mapping(pgd_t *pgdir, unsigned long phys,
 		unsigned long (*alloc_pgtable)(void),
 		unsigned long flags)
 {
-	unsigned long *SHM_BASE = _shared_memory;
-
-	//*SHM_BASE = 0x88888888;
-
 	pgd_t *pgdp = pgd_offset_raw(pgdir, virt);
 	unsigned long addr, end, next;
 
@@ -145,60 +135,20 @@ static void __create_pgd_mapping(pgd_t *pgdir, unsigned long phys,
 	} while (pgdp++, addr = next, addr != end);
 }
 
-#if 1
 static unsigned long early_pgtable_alloc(void)
 {
-	unsigned long *phys;
-	unsigned long *SHM_BASE = _shared_memory;
-
-	*SHM_BASE = 0xBBBBBBB0;
+	unsigned long phys;
 
 	phys = get_free_page();
-	*SHM_BASE = phys;
-	*phys = 0x87654321;
-	*SHM_BASE = 0xBBBBBBB9;
 	memset((void *)phys, 0, PAGE_SIZE);
-	*SHM_BASE = 0xBBBBBBB2;
 
 	return phys;
 }
-#else
-static inline unsigned long read_sctlr_el1(void)
-{
-    unsigned long v;
-    asm volatile("mrs %0, sctlr_el1" : "=r"(v));
-    return v;
-}
-
-static unsigned long early_pgtable_alloc(void)
-{
-    unsigned long phys;
-    volatile long *shm = (volatile long *)_shared_memory;
-
-    shm[0] = 0xBBBBBBB0ULL;
-    shm[1] = read_sctlr_el1();
-
-    phys = get_free_page();
-    shm[2] = phys;
-
-    if (!phys) { shm[3] = 0xDEAD0000ULL; for(;;); }
-
-    *(volatile long *)phys = 0;
-    shm[4] = 0xBBBBBBB9ULL;
-
-    memset((void *)phys, 0, PAGE_SIZE);
-    shm[5] = 0xBBBBBBB2ULL;
-
-    return phys;
-}
-#endif
 
 static void create_identical_mapping(void)
 {
 	unsigned long start;
 	unsigned long end;
-
-	unsigned long *SHM_BASE = _shared_memory;
 
 	/*map text*/
 	start = (unsigned long)_text_boot;
@@ -208,11 +158,9 @@ static void create_identical_mapping(void)
 			early_pgtable_alloc,
 			0);
 
-	//*SHM_BASE = 0x99999999;
-
 	/*map memory*/
 	start = PAGE_ALIGN((unsigned long)_etext);
-	end = TOTAL_MEMORY;
+	end = (unsigned long)_stack_top;
 	__create_pgd_mapping((pgd_t *)idmap_pg_dir, start, start,
 			end - start, PAGE_KERNEL,
 			early_pgtable_alloc,
@@ -284,16 +232,10 @@ static int enable_mmu(void)
 
 void paging_init(void)
 {
-	unsigned long *SHM_BASE = _shared_memory;
-
 	memset(idmap_pg_dir, 0, PAGE_SIZE);
-	*SHM_BASE = 0x33333333;
 	create_identical_mapping();
-	*SHM_BASE = 0x44444444;
+
 	create_mmio_mapping();
-	*SHM_BASE = 0x55555555;
 	cpu_init();
-	*SHM_BASE = 0x66666666;
 	enable_mmu();
-	*SHM_BASE = 0x77777777;
 }

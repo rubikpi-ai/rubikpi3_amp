@@ -1,19 +1,36 @@
-#include <array_size.h>
+#include <type.h>
 #include <asm/gpio.h>
+#include <io.h>
+
+#define ACCESSOR(name) \
+static u32 readl_##name(struct gpio_tlmm *g)\
+{ \
+	return readl(0x0f100000 + g->name##_reg); \
+} \
+static void writel_##name(u32 val, struct gpio_tlmm *g) \
+{ \
+	writel(val, 0x0f100000 + g->name##_reg); \
+}
+
+ACCESSOR(ctl)
+ACCESSOR(io)
+ACCESSOR(intr_cfg)
+ACCESSOR(intr_status)
+ACCESSOR(intr_target)
 
 #define GPIO(id, f1, f2, f3, f4, f5, f6, f7, f8, f9)	\
 	{					        \
-		.funcs = (int[]){			\
-			msm_mux_gpio, /* gpio mode */	\
-			msm_mux_##f1,			\
-			msm_mux_##f2,			\
-			msm_mux_##f3,			\
-			msm_mux_##f4,			\
-			msm_mux_##f5,			\
-			msm_mux_##f6,			\
-			msm_mux_##f7,			\
-			msm_mux_##f8,			\
-			msm_mux_##f9			\
+		.funcs = (unsigned[]){			\
+			mux_gpio, /* gpio mode */	\
+			mux_##f1,			\
+			mux_##f2,			\
+			mux_##f3,			\
+			mux_##f4,			\
+			mux_##f5,			\
+			mux_##f6,			\
+			mux_##f7,			\
+			mux_##f8,			\
+			mux_##f9			\
 		},				        \
 		.nfuncs = 10,				\
 		.ctl_reg = 0x1000 * id,			\
@@ -38,157 +55,6 @@
 		.intr_detection_bit = 2,	\
 		.intr_detection_width = 2,	\
 	}
-
-enum gpio_functions {
-	msm_mux_atest_char,
-	msm_mux_atest_char0,
-	msm_mux_atest_char1,
-	msm_mux_atest_char2,
-	msm_mux_atest_char3,
-	msm_mux_atest_usb0,
-	msm_mux_atest_usb00,
-	msm_mux_atest_usb01,
-	msm_mux_atest_usb02,
-	msm_mux_atest_usb03,
-	msm_mux_atest_usb1,
-	msm_mux_atest_usb10,
-	msm_mux_atest_usb11,
-	msm_mux_atest_usb12,
-	msm_mux_atest_usb13,
-	msm_mux_audio_ref,
-	msm_mux_cam_mclk,
-	msm_mux_cci_async,
-	msm_mux_cci_i2c,
-	msm_mux_cci_timer0,
-	msm_mux_cci_timer1,
-	msm_mux_cci_timer2,
-	msm_mux_cci_timer3,
-	msm_mux_cci_timer4,
-	msm_mux_cmu_rng0,
-	msm_mux_cmu_rng1,
-	msm_mux_cmu_rng2,
-	msm_mux_cmu_rng3,
-	msm_mux_coex_uart1,
-	msm_mux_cri_trng,
-	msm_mux_cri_trng0,
-	msm_mux_cri_trng1,
-	msm_mux_dbg_out,
-	msm_mux_ddr_bist,
-	msm_mux_ddr_pxi0,
-	msm_mux_ddr_pxi1,
-	msm_mux_dp_hot,
-	msm_mux_dp_lcd,
-	msm_mux_edp_hot,
-	msm_mux_edp_lcd,
-	msm_mux_egpio,
-	msm_mux_gcc_gp1,
-	msm_mux_gcc_gp2,
-	msm_mux_gcc_gp3,
-	msm_mux_gpio,
-	msm_mux_host2wlan_sol,
-	msm_mux_ibi_i3c,
-	msm_mux_jitter_bist,
-	msm_mux_lpass_slimbus,
-	msm_mux_mdp_vsync,
-	msm_mux_mdp_vsync0,
-	msm_mux_mdp_vsync1,
-	msm_mux_mdp_vsync2,
-	msm_mux_mdp_vsync3,
-	msm_mux_mdp_vsync4,
-	msm_mux_mdp_vsync5,
-	msm_mux_mi2s0_data0,
-	msm_mux_mi2s0_data1,
-	msm_mux_mi2s0_sck,
-	msm_mux_mi2s0_ws,
-	msm_mux_mi2s1_data0,
-	msm_mux_mi2s1_data1,
-	msm_mux_mi2s1_sck,
-	msm_mux_mi2s1_ws,
-	msm_mux_mi2s2_data0,
-	msm_mux_mi2s2_data1,
-	msm_mux_mi2s2_sck,
-	msm_mux_mi2s2_ws,
-	msm_mux_mss_grfc0,
-	msm_mux_mss_grfc1,
-	msm_mux_mss_grfc10,
-	msm_mux_mss_grfc11,
-	msm_mux_mss_grfc12,
-	msm_mux_mss_grfc2,
-	msm_mux_mss_grfc3,
-	msm_mux_mss_grfc4,
-	msm_mux_mss_grfc5,
-	msm_mux_mss_grfc6,
-	msm_mux_mss_grfc7,
-	msm_mux_mss_grfc8,
-	msm_mux_mss_grfc9,
-	msm_mux_nav_gpio0,
-	msm_mux_nav_gpio1,
-	msm_mux_nav_gpio2,
-	msm_mux_pa_indicator,
-	msm_mux_pcie0_clkreqn,
-	msm_mux_pcie1_clkreqn,
-	msm_mux_phase_flag,
-	msm_mux_pll_bist,
-	msm_mux_pll_bypassnl,
-	msm_mux_pll_clk,
-	msm_mux_pll_reset,
-	msm_mux_pri_mi2s,
-	msm_mux_prng_rosc,
-	msm_mux_qdss,
-	msm_mux_qdss_cti,
-	msm_mux_qlink0_enable,
-	msm_mux_qlink0_request,
-	msm_mux_qlink0_wmss,
-	msm_mux_qlink1_enable,
-	msm_mux_qlink1_request,
-	msm_mux_qlink1_wmss,
-	msm_mux_qspi_clk,
-	msm_mux_qspi_cs,
-	msm_mux_qspi_data,
-	msm_mux_qup00,
-	msm_mux_qup01,
-	msm_mux_qup02,
-	msm_mux_qup03,
-	msm_mux_qup04,
-	msm_mux_qup05,
-	msm_mux_qup06,
-	msm_mux_qup07,
-	msm_mux_qup10,
-	msm_mux_qup11,
-	msm_mux_qup12,
-	msm_mux_qup13,
-	msm_mux_qup14,
-	msm_mux_qup15,
-	msm_mux_qup16,
-	msm_mux_qup17,
-	msm_mux_sd_write,
-	msm_mux_sdc40,
-	msm_mux_sdc41,
-	msm_mux_sdc42,
-	msm_mux_sdc43,
-	msm_mux_sdc4_clk,
-	msm_mux_sdc4_cmd,
-	msm_mux_sec_mi2s,
-	msm_mux_tb_trig,
-	msm_mux_tgu_ch0,
-	msm_mux_tgu_ch1,
-	msm_mux_tsense_pwm1,
-	msm_mux_tsense_pwm2,
-	msm_mux_uim0_clk,
-	msm_mux_uim0_data,
-	msm_mux_uim0_present,
-	msm_mux_uim0_reset,
-	msm_mux_uim1_clk,
-	msm_mux_uim1_data,
-	msm_mux_uim1_present,
-	msm_mux_uim1_reset,
-	msm_mux_usb2phy_ac,
-	msm_mux_usb_phy,
-	msm_mux_vfr_0,
-	msm_mux_vfr_1,
-	msm_mux_vsense_trigger,
-	msm_mux__,
-};
 
 static const struct gpio_tlmm gpio_desc[] = {
 	[0] = GPIO(0, qup00, ibi_i3c, _, _, _, _, _, _, _),
@@ -368,105 +234,85 @@ static const struct gpio_tlmm gpio_desc[] = {
 	[174] = GPIO(174, qdss, _, _, _, _, _, _, _, egpio),
 };
 
-
-#if 0
-static int msm_pinmux_set_mux(struct pinctrl_dev *pctldev,
-			      unsigned function,
-			      unsigned group)
+int gpio_pinmux_set(unsigned gpio, unsigned function)
 {
-	struct msm_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
-	struct gpio_chip *gc = &pctrl->chip;
-	unsigned int irq = irq_find_mapping(gc->irq.domain, group);
-	struct irq_data *d = irq_get_irq_data(irq);
-	unsigned int gpio_func = pctrl->soc->gpio_func;
-	unsigned int egpio_func = pctrl->soc->egpio_func;
-	const struct msm_pingroup *g;
-	unsigned long flags;
-	u32 val, mask;
+	const struct gpio_tlmm *g = &gpio_desc[gpio];
+	u32 mask = 0x3c;
+	u32 nfuncs = 10;
+	u32 val;
 	int i;
-
-	g = &pctrl->soc->groups[group];
-	mask = GENMASK(g->mux_bit + order_base_2(g->nfuncs) - 1, g->mux_bit);
 
 	for (i = 0; i < g->nfuncs; i++) {
 		if (g->funcs[i] == function)
 			break;
 	}
 
-	if (WARN_ON(i == g->nfuncs))
+	if (i == nfuncs)
 		return -EINVAL;
 
-	/*
-	 * If an GPIO interrupt is setup on this pin then we need special
-	 * handling.  Specifically interrupt detection logic will still see
-	 * the pin twiddle even when we're muxed away.
-	 *
-	 * When we see a pin with an interrupt setup on it then we'll disable
-	 * (mask) interrupts on it when we mux away until we mux back.  Note
-	 * that disable_irq() refcounts and interrupts are disabled as long as
-	 * at least one disable_irq() has been called.
-	 */
-	if (d && i != gpio_func &&
-	    !test_and_set_bit(d->hwirq, pctrl->disabled_for_mux))
-		disable_irq_nosync(irq);
+	val = readl_ctl(g);
+	val &= ~mask;
+	val |= i << g->mux_bit;
 
-	raw_spin_lock_irqsave(&pctrl->lock, flags);
-
-	val = msm_readl_ctl(pctrl, g);
-
-	/*
-	 * If this is the first time muxing to GPIO and the direction is
-	 * output, make sure that we're not going to be glitching the pin
-	 * by reading the current state of the pin and setting it as the
-	 * output.
-	 */
-	if (i == gpio_func && (val & BIT(g->oe_bit)) &&
-	    !test_and_set_bit(group, pctrl->ever_gpio)) {
-		u32 io_val = msm_readl_io(pctrl, g);
-
-		if (io_val & BIT(g->in_bit)) {
-			if (!(io_val & BIT(g->out_bit)))
-				msm_writel_io(io_val | BIT(g->out_bit), pctrl, g);
-		} else {
-			if (io_val & BIT(g->out_bit))
-				msm_writel_io(io_val & ~BIT(g->out_bit), pctrl, g);
-		}
-	}
-
-	if (egpio_func && i == egpio_func) {
-		if (val & BIT(g->egpio_present))
-			val &= ~BIT(g->egpio_enable);
-	} else {
-		val &= ~mask;
-		val |= i << g->mux_bit;
-		/* Claim ownership of pin if egpio capable */
-		if (egpio_func && val & BIT(g->egpio_present))
-			val |= BIT(g->egpio_enable);
-	}
-
-	msm_writel_ctl(val, pctrl, g);
-
-	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
-
-	if (d && i == gpio_func &&
-	    test_and_clear_bit(d->hwirq, pctrl->disabled_for_mux)) {
-		/*
-		 * Clear interrupts detected while not GPIO since we only
-		 * masked things.
-		 */
-		if (d->parent_data && test_bit(d->hwirq, pctrl->skip_wake_irqs))
-			irq_chip_set_parent_state(d, IRQCHIP_STATE_PENDING, false);
-		else
-			msm_ack_intr_status(pctrl, g);
-
-		enable_irq(irq);
-	}
+	writel_ctl(val, g);
 
 	return 0;
 }
 
-int gpio_set_mux(unsigned gpio, unsigned function)
+int gpio_direction_input(unsigned offset)
 {
+	const struct gpio_tlmm *g = &gpio_desc[offset];
+	unsigned long flags;
+	u32 val;
 
+	val = readl_ctl(g);
+	val &= ~BIT(g->oe_bit);
+	writel_ctl(val, g);
+
+	return 0;
 }
-#endif
+
+int gpio_direction_output(unsigned offset, int value)
+{
+	const struct gpio_tlmm *g = &gpio_desc[offset];
+	unsigned long flags;
+	u32 val;
+
+	val = readl_io(g);
+	if (value)
+		val |= BIT(g->out_bit);
+	else
+		val &= ~BIT(g->out_bit);
+	writel_io(val, g);
+
+	val = readl_ctl(g);
+	val |= BIT(g->oe_bit);
+	writel_ctl(val, g);
+
+	return 0;
+}
+
+int gpio_get(unsigned offset)
+{
+	const struct gpio_tlmm *g = &gpio_desc[offset];
+	u32 val;
+
+	val = readl_io(g);
+	return !!(val & BIT(g->in_bit));
+}
+
+int gpio_set(unsigned int offset, int value)
+{
+	const struct gpio_tlmm *g = &gpio_desc[offset];
+	unsigned long flags;
+	u32 val;
+
+	val = readl_io(g);
+	if (value)
+		val |= BIT(g->out_bit);
+	else
+		val &= ~BIT(g->out_bit);
+	writel_io(val, g);
+
+	return 0;
+}

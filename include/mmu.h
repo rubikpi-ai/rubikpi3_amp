@@ -1,1 +1,6 @@
-#ifndef _P_IO_H
+#ifndef _MMU_H
+#define _MMU_H
+
+void paging_init(void);
+
+#endif

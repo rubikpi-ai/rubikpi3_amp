@@ -12,6 +12,7 @@ size_t strlen(const char *s)
 	return sc - s;
 }
 
+#if 0
 static void *__memset_1bytes(void *s, int c, size_t count)
 {
 	char *xs = s;
@@ -62,12 +63,22 @@ void *__memset(char *s, int c, size_t count)
 	return s;
 }
 
+
 #ifndef __HAVE_ARCH_MEMSET
 void *memset(void *s, int c, size_t count)
 {
 	return __memset(s, c, count);
 }
 #endif
+
+#endif
+
+void *memset(void *s, int c, size_t n)
+{
+	unsigned char *p = (unsigned char *)s;
+	while (n--) *p++ = c;
+	return s;
+}
 
 void *memcpy(void *dest, const void *src, size_t count)
 {

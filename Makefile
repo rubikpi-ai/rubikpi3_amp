@@ -1,6 +1,6 @@
 ARMGNU ?= aarch64-linux-gnu
 
-COPS += -g -Wall -nostdlib -nostdinc -Iinclude
+COPS += -g -Wall -nostdlib -nostdinc -fno-builtin -Iinclude
 ASMOPS = -g -Iinclude
 
 BUILD_DIR = build
