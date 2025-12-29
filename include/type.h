@@ -64,6 +64,9 @@ typedef unsigned int u32;
 typedef long long s64;
 typedef unsigned long long u64;
 
+typedef unsigned long		uintptr_t;
+typedef long			intptr_t;
+
 #ifndef _SIZE_T
 #define _SIZE_T
 typedef unsigned int size_t;

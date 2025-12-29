@@ -59,41 +59,6 @@ el2_entry:
 
 	eret
 
-.align 11
-.global vectors
-vectors:
-    /* current EL, SP0: sync/irq/fiq/serr */
-    b sync_cur_sp0
-    b .
-    b .
-    b .
-    /* current EL, SPx */
-    b sync_cur_spx
-    b .
-    b .
-    b .
-    /* lower EL, AArch64 */
-    b .
-    b .
-    b .
-    b .
-    /* lower EL, AArch32 */
-    b .
-    b .
-    b .
-    b .
-
-sync_cur_sp0:
-sync_cur_spx:
-    ldr x0, =_shared_memory
-    mrs x1, esr_el1
-    mrs x2, far_el1
-    mrs x3, elr_el1
-    str x1, [x0]        /* ESR */
-    str x2, [x0, #8]    /* FAR */
-    str x3, [x0, #16]   /* ELR */
-1:  b 1b
-
 el1_entry:
 	adr x0, _bss
 	adr x1, _ebss
@@ -110,9 +75,9 @@ el1_entry:
 	sub x1, x1, x0
 	bl memzero
 
-//	ldr x0, =vectors
-//	msr vbar_el1, x0
-//	isb
+	ldr     x0, =vectors
+	msr     vbar_el1, x0
+	isb
 
 	ldr x0, =_stack_top
 	mov	sp, x0

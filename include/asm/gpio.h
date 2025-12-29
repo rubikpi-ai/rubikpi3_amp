@@ -195,4 +195,12 @@ enum gpio_functions {
 	mux__,
 };
 
+int gpio_pinmux_set(unsigned gpio, unsigned function);
+int gpio_direction_input(unsigned offset);
+int gpio_direction_output(unsigned offset, int value);
+int gpio_get(unsigned offset);
+int gpio_set(unsigned int offset, int value);
+
+
+
 #endif
