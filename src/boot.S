@@ -4,6 +4,50 @@
 
 .section ".text.boot"
 
+/* ---- GICv3 sysreg encodings (toolchain-safe) ----
+ * ICC_SRE_EL2        S3_4_C12_C9_5
+ * ICC_SRE_EL1        S3_0_C12_C12_5
+ * ICC_PMR_EL1        S3_0_C4_C6_0
+ * ICC_BPR1_EL1       S3_0_C12_C12_3
+ * ICC_CTLR_EL1       S3_0_C12_C12_4
+ * ICC_IGRPEN1_EL1    S3_0_C12_C12_7
+ * (Optional) ICC_IGRPEN0_EL1 S3_0_C12_C12_6
+ */
+
+	.macro gicv3_cpuif_init_el2
+/* Enable system register interface at EL2 */
+	mrs x0, S3_4_C12_C9_5          /* ICC_SRE_EL2 */
+	orr x0, x0, #1                 /* set SRE bit */
+	msr S3_4_C12_C9_5, x0
+	isb
+
+	/* Ensure EL1 sees SRE enabled too (usually optional if EL1 sets it, but harmless) */
+	mrs x0, S3_0_C12_C12_5         /* ICC_SRE_EL1 */
+	orr x0, x0, #1
+	msr S3_0_C12_C12_5, x0
+	isb
+
+	/* Allow all priorities */
+	mov x0, #0xFF
+	msr S3_0_C4_C6_0, x0           /* ICC_PMR_EL1 */
+	isb
+
+	/* No priority grouping */
+	mov x0, #0
+	msr S3_0_C12_C12_3, x0         /* ICC_BPR1_EL1 */
+	isb
+
+	/* Default control (keep simple) */
+	mov x0, #0
+	msr S3_0_C12_C12_4, x0         /* ICC_CTLR_EL1 */
+	isb
+
+	/* Enable Group1 interrupts at EL1 */
+	mov x0, #1
+	msr S3_0_C12_C12_7, x0         /* ICC_IGRPEN1_EL1 */
+	isb
+	.endm
+
 .globl _start
 _start:
 	b master
@@ -47,6 +91,12 @@ el2_entry:
 	orr     x0, x0, #3                      // Enable EL1 physical timers
 	msr     cnthctl_el2, x0
 	msr     cntvoff_el2, xzr                // Clear virtual offset
+
+	ldr x9, =_shared_memory
+	mov x10, #0xE2E2
+	str x10, [x9, #240]     // mark: in el2 before gic init
+
+	gicv3_cpuif_init_el2
 
 	ldr x0, =SCTLR_EL1_VALUE_MMU_DISABLED
 	msr sctlr_el1, x0

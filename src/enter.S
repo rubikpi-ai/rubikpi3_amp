@@ -267,7 +267,7 @@ el1_irq:
 	 */
 	str x30, [sp, -8]!
 	bl kernel_entry
-	bl irq_handle
+	bl irq_handler
 
 	/* 注意在kernel_exit函数里，需要把 刚才保存在sp-8的lr寄存器恢复*/
 	bl kernel_exit
