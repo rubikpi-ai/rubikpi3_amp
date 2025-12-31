@@ -1,0 +1,27 @@
+#!/bin/sh
+exec tail -n +3 $0
+# This file provides an easy way to add custom menu entries.  Simply type the
+# menu entries you want to add after this comment.  Be careful not to change
+# the 'exec tail' line above.
+
+
+
+menuentry 'aaaaaaaaaaa' --class debian --class gnu-linux --class gnu --class os $menuentry_id_option 'gnulinux-simple-131450ff-95bc-4791-b611-70855201b0cd' {
+	recordfail
+	load_video
+	gfxmode $linux_gfx_mode
+	insmod gzio
+	if [ x$grub_platform = xxen ]; then insmod xzio; insmod lzopio; fi
+	insmod part_gpt
+	insmod ext2
+	set root='hd0,gpt3'
+	if [ x$feature_platform_search_hint = xy ]; then
+	  search --no-floppy --fs-uuid --set=root --hint-bios=hd0,gpt3 --hint-efi=hd0,gpt3 --hint-baremetal=ahci0,gpt3  131450ff-95bc-4791-b611-70855201b0cd
+	else
+	  search --no-floppy --fs-uuid --set=root 131450ff-95bc-4791-b611-70855201b0cd
+	fi
+	devicetree /qcs6490-thundercomm-rubikpi3.dtb
+	linux	/boot/vmlinuz-mainline root=UUID=131450ff-95bc-4791-b611-70855201b0cd ro root=LABEL=writable rw console=ttyMSM0,115200n8 pcie_pme=nomsi earlycon ignore_loglevel quiet splash $vt_handoff maxcpus=7
+	initrd	/boot/initrd.img-mainline
+}
+

@@ -1,23 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * ampcpu7: load and start a baremetal payload on CPU7 via PSCI CPU_ON.
- *
- * Interfaces:
- *  1) /dev/ampcpu7
- *     - write(): write payload bytes to entry_pa + file_offset
- *     - llseek(): set file offset
- *
- *  2) debugfs: /sys/kernel/debug/ampcpu7/
- *     - status (ro)
- *     - start  (wo)        : PSCI CPU_ON(mpidr, entry_pa)
- *     - flush  (wo)        : flush <size> bytes from entry_pa (decimal/hex)
- *     - mpidr (rw)         : default 0x700
- *     - entry_pa (rw)      : default 0xD0800000
- *     - max_load_size (rw) : default 10MB
- *
- * Notes:
- *  - CPU7 must be offline in Linux before start. This driver only checks.
- *  - Cache maintenance uses flush_cache_vmap + flush_icache_range for module portability.
+ * ampcpu7: load and start baremetal on CPU7 via PSCI CPU_ON.
+ * Adds:
+ *  - debugfs reset node: writes RESET command to shared memory for baremetal to PSCI CPU_OFF itself.
+ *  - on rmmod: best-effort send reset command.
  */
 
 #include <linux/module.h>
@@ -34,22 +20,26 @@
 #include <linux/delay.h>
 #include <linux/debugfs.h>
 #include <asm/cacheflush.h>
-#include <asm/smp.h>
 
 #define DRV_NAME "ampcpu7"
 #define DEV_NAME "ampcpu7"
 
 #define PSCI_0_2_FN64_CPU_ON  0xC4000003ULL
 
+/* shared memory reset protocol */
+#define AMP_CMD_IDX      32
+#define AMP_CMD_RESET    0x52534554ULL /* 'RSET' */
+
 struct ampcpu_ctx {
 	struct mutex lock;
 
-	int target_cpu;
-	u64 mpidr;              /* 0x700 */
-	phys_addr_t entry_pa;   /* 0xD0800000 */
-	size_t max_load_size;   /* 10MB default */
+	int target_cpu;         /* logical cpu id, default 7 */
+	u64 mpidr;              /* PSCI target MPIDR, default 0x700 */
+	phys_addr_t entry_pa;   /* payload entry PA, default 0xD0800000 */
+	phys_addr_t shm_pa;     /* shared memory PA, default 0xD7C00000 */
+	size_t max_load_size;   /* payload load limit */
 
-	u64 bytes_loaded;       /* high-water mark */
+	u64 bytes_loaded;
 	s64 last_psci_ret;
 
 	/* chrdev */
@@ -66,6 +56,7 @@ static struct ampcpu_ctx g = {
 	.target_cpu = 7,
 	.mpidr = 0x700,
 	.entry_pa = 0xD0800000ULL,
+	.shm_pa = 0xD7C00000ULL,
 	.max_load_size = 10 * 1024 * 1024,
 	.last_psci_ret = 0,
 };
@@ -98,6 +89,34 @@ static void amp_flush_payload(phys_addr_t pa, size_t sz)
 	flush_icache_range((unsigned long)va, (unsigned long)va + sz);
 
 	memunmap(va);
+}
+
+/* best-effort: write RESET command into shared memory */
+static int amp_send_reset_cmd_best_effort(void)
+{
+	void *va;
+	phys_addr_t cmd_pa;
+	u64 *p;
+
+	mutex_lock(&g.lock);
+	cmd_pa = g.shm_pa + (phys_addr_t)(AMP_CMD_IDX * sizeof(u64));
+	mutex_unlock(&g.lock);
+
+	va = memremap(cmd_pa, sizeof(u64), MEMREMAP_WB);
+	if (!va)
+		return -ENOMEM;
+
+	p = (u64 *)va;
+	WRITE_ONCE(*p, AMP_CMD_RESET);
+
+	/* flush so CPU7 sees it */
+	flush_cache_vmap((unsigned long)va, (unsigned long)va + sizeof(u64));
+
+	memunmap(va);
+
+	/* give CPU7 some time to observe and CPU_OFF */
+	msleep(50);
+	return 0;
 }
 
 /* -------------------- chrdev: write payload -------------------- */
@@ -134,7 +153,6 @@ static ssize_t ampcpu_write(struct file *file, const char __user *ubuf, size_t l
 		return -EFAULT;
 	}
 
-	/* flush this chunk so CPU7 sees it */
 	flush_cache_vmap((unsigned long)va, (unsigned long)va + to_copy);
 	flush_icache_range((unsigned long)va, (unsigned long)va + to_copy);
 
@@ -179,33 +197,49 @@ static const struct file_operations ampcpu_fops = {
 	.owner  = THIS_MODULE,
 	.write  = ampcpu_write,
 	.llseek = ampcpu_llseek,
-	/* .open/.release not required; omit to avoid simple_release mismatch */
 };
 
 /* -------------------- debugfs helpers -------------------- */
 
 static ssize_t dbg_status_read(struct file *f, char __user *ubuf, size_t cnt, loff_t *ppos)
 {
-	char buf[256];
+	char buf[320];
 	int len;
 	int cpu;
+	u64 mpidr;
+	u64 entry;
+	u64 shm;
+	size_t maxsz;
+	u64 loaded;
+	s64 last;
 
 	mutex_lock(&g.lock);
 	cpu = g.target_cpu;
+	mpidr = g.mpidr;
+	entry = (u64)g.entry_pa;
+	shm = (u64)g.shm_pa;
+	maxsz = g.max_load_size;
+	loaded = g.bytes_loaded;
+	last = g.last_psci_ret;
+	mutex_unlock(&g.lock);
+
 	len = scnprintf(buf, sizeof(buf),
-			"mpidr=0x%llx (cpu%d)\n"
+			"target_cpu=%d\n"
+			"mpidr=0x%llx\n"
 			"entry_pa=0x%llx\n"
+			"shm_pa=0x%llx (cmd idx=%u)\n"
 			"max_load_size=0x%zx\n"
 			"bytes_loaded=0x%llx\n"
 			"cpu_online=%d (must be 0 before start)\n"
 			"last_psci_ret=%lld (0x%llx)\n",
-			(unsigned long long)g.mpidr, cpu,
-			(unsigned long long)g.entry_pa,
-			g.max_load_size,
-			(unsigned long long)g.bytes_loaded,
+			cpu,
+			(unsigned long long)mpidr,
+			(unsigned long long)entry,
+			(unsigned long long)shm, AMP_CMD_IDX,
+			maxsz,
+			(unsigned long long)loaded,
 			cpu_possible(cpu) ? cpu_online(cpu) : -1,
-			(long long)g.last_psci_ret, (unsigned long long)g.last_psci_ret);
-	mutex_unlock(&g.lock);
+			(long long)last, (unsigned long long)last);
 
 	return simple_read_from_buffer(ubuf, cnt, ppos, buf, len);
 }
@@ -225,16 +259,16 @@ static ssize_t dbg_start_write(struct file *f, const char __user *ubuf, size_t c
 	u64 flush_sz;
 
 	mutex_lock(&g.lock);
+	cpu = g.target_cpu;
 	mpidr = g.mpidr;
 	entry = g.entry_pa;
 	flush_sz = g.bytes_loaded ? g.bytes_loaded : 0x1000;
 	mutex_unlock(&g.lock);
 
-	cpu = g.target_cpu;
 	if (!cpu_possible(cpu))
 		return -EINVAL;
 	if (cpu_online(cpu))
-		return -EBUSY; /* you want offline */
+		return -EBUSY;
 
 	amp_flush_payload(entry, (size_t)flush_sz);
 
@@ -245,7 +279,7 @@ static ssize_t dbg_start_write(struct file *f, const char __user *ubuf, size_t c
 	mutex_unlock(&g.lock);
 
 	pr_err(DRV_NAME ": PSCI CPU_ON mpidr=0x%llx entry=0x%llx ret=%d\n",
-       (unsigned long long)mpidr, (unsigned long long)entry, ret);
+	       (unsigned long long)mpidr, (unsigned long long)entry, ret);
 
 	return ret ? ret : cnt;
 }
@@ -262,6 +296,7 @@ static ssize_t dbg_flush_write(struct file *f, const char __user *ubuf, size_t c
 	char buf[64];
 	u64 sz;
 	phys_addr_t entry;
+	size_t maxsz;
 
 	if (cnt >= sizeof(buf))
 		return -EINVAL;
@@ -274,9 +309,10 @@ static ssize_t dbg_flush_write(struct file *f, const char __user *ubuf, size_t c
 
 	mutex_lock(&g.lock);
 	entry = g.entry_pa;
+	maxsz = g.max_load_size;
 	mutex_unlock(&g.lock);
 
-	amp_flush_payload(entry, (size_t)min_t(u64, sz, (u64)g.max_load_size));
+	amp_flush_payload(entry, (size_t)min_t(u64, sz, (u64)maxsz));
 	return cnt;
 }
 
@@ -287,6 +323,27 @@ static const struct file_operations dbg_flush_fops = {
 	.llseek = default_llseek,
 };
 
+static ssize_t dbg_reset_write(struct file *f, const char __user *ubuf, size_t cnt, loff_t *ppos)
+{
+	int ret;
+
+	/* send reset cmd even if cpu is online/offline; baremetal decides */
+	ret = amp_send_reset_cmd_best_effort();
+	if (ret)
+		return ret;
+
+	pr_info(DRV_NAME ": reset command sent via shm[%" __stringify(AMP_CMD_IDX) "]\n");
+	return cnt;
+}
+
+static const struct file_operations dbg_reset_fops = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.write = dbg_reset_write,
+	.llseek = default_llseek,
+};
+
+/* rw u64 nodes */
 static ssize_t dbg_u64_read(struct file *f, char __user *ubuf, size_t cnt, loff_t *ppos)
 {
 	u64 *val = f->private_data;
@@ -330,6 +387,51 @@ static const struct file_operations dbg_u64_fops = {
 	.llseek = default_llseek,
 };
 
+/* rw int node */
+static ssize_t dbg_int_read(struct file *f, char __user *ubuf, size_t cnt, loff_t *ppos)
+{
+	int *val = f->private_data;
+	char buf[64];
+	int len;
+
+	mutex_lock(&g.lock);
+	len = scnprintf(buf, sizeof(buf), "%d\n", *val);
+	mutex_unlock(&g.lock);
+
+	return simple_read_from_buffer(ubuf, cnt, ppos, buf, len);
+}
+
+static ssize_t dbg_int_write(struct file *f, const char __user *ubuf, size_t cnt, loff_t *ppos)
+{
+	int *val = f->private_data;
+	char buf[64];
+	long tmp;
+
+	if (cnt >= sizeof(buf))
+		return -EINVAL;
+	if (copy_from_user(buf, ubuf, cnt))
+		return -EFAULT;
+	buf[cnt] = '\0';
+
+	if (kstrtol(buf, 0, &tmp))
+		return -EINVAL;
+
+	mutex_lock(&g.lock);
+	*val = (int)tmp;
+	mutex_unlock(&g.lock);
+
+	return cnt;
+}
+
+static const struct file_operations dbg_int_fops = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.read = dbg_int_read,
+	.write = dbg_int_write,
+	.llseek = default_llseek,
+};
+
+/* rw size_t node */
 static ssize_t dbg_size_read(struct file *f, char __user *ubuf, size_t cnt, loff_t *ppos)
 {
 	size_t *val = f->private_data;
@@ -373,49 +475,6 @@ static const struct file_operations dbg_size_fops = {
 	.llseek = default_llseek,
 };
 
-static ssize_t dbg_int_read(struct file *f, char __user *ubuf, size_t cnt, loff_t *ppos)
-{
-    int *val = f->private_data;
-    char buf[64];
-    int len;
-
-    mutex_lock(&g.lock);
-    len = scnprintf(buf, sizeof(buf), "%d\n", *val);
-    mutex_unlock(&g.lock);
-
-    return simple_read_from_buffer(ubuf, cnt, ppos, buf, len);
-}
-
-static ssize_t dbg_int_write(struct file *f, const char __user *ubuf, size_t cnt, loff_t *ppos)
-{
-    int *val = f->private_data;
-    char buf[64];
-    long tmp;
-
-    if (cnt >= sizeof(buf))
-        return -EINVAL;
-    if (copy_from_user(buf, ubuf, cnt))
-        return -EFAULT;
-    buf[cnt] = '\0';
-
-    if (kstrtol(buf, 0, &tmp))
-        return -EINVAL;
-
-    mutex_lock(&g.lock);
-    *val = (int)tmp;
-    mutex_unlock(&g.lock);
-
-    return cnt;
-}
-
-static const struct file_operations dbg_int_fops = {
-    .owner = THIS_MODULE,
-    .open = simple_open,
-    .read = dbg_int_read,
-    .write = dbg_int_write,
-    .llseek = default_llseek,
-};
-
 /* -------------------- module init/exit -------------------- */
 
 static int __init ampcpu_init(void)
@@ -457,16 +516,22 @@ static int __init ampcpu_init(void)
 
 	debugfs_create_file("status", 0444, g.dbg_dir, NULL, &dbg_status_fops);
 	debugfs_create_file("start", 0200, g.dbg_dir, NULL, &dbg_start_fops);
+	debugfs_create_file("reset", 0200, g.dbg_dir, NULL, &dbg_reset_fops);
 	debugfs_create_file("flush", 0200, g.dbg_dir, NULL, &dbg_flush_fops);
+
+	debugfs_create_file("target_cpu", 0644, g.dbg_dir, &g.target_cpu, &dbg_int_fops);
 	debugfs_create_file("mpidr", 0644, g.dbg_dir, &g.mpidr, &dbg_u64_fops);
 	debugfs_create_file("entry_pa", 0644, g.dbg_dir, (u64 *)&g.entry_pa, &dbg_u64_fops);
+	debugfs_create_file("shm_pa", 0644, g.dbg_dir, (u64 *)&g.shm_pa, &dbg_u64_fops);
 	debugfs_create_file("max_load_size", 0644, g.dbg_dir, &g.max_load_size, &dbg_size_fops);
-	debugfs_create_file("target_cpu", 0644, g.dbg_dir, &g.target_cpu, &dbg_int_fops);
 
 	pr_info(DRV_NAME ": /dev/%s created; debugfs: /sys/kernel/debug/%s/\n",
 		DEV_NAME, DRV_NAME);
-	pr_info(DRV_NAME ": mpidr=0x%llx entry_pa=0x%llx max_load_size=%zu\n",
-		(unsigned long long)g.mpidr, (unsigned long long)g.entry_pa, g.max_load_size);
+	pr_info(DRV_NAME ": target_cpu=%d mpidr=0x%llx entry_pa=0x%llx shm_pa=0x%llx\n",
+		g.target_cpu,
+		(unsigned long long)g.mpidr,
+		(unsigned long long)g.entry_pa,
+		(unsigned long long)g.shm_pa);
 
 	return 0;
 
@@ -483,17 +548,21 @@ err_unregister:
 
 static void __exit ampcpu_exit(void)
 {
+	/* best-effort reset on unload */
+	amp_send_reset_cmd_best_effort();
+
 	debugfs_remove_recursive(g.dbg_dir);
 	device_destroy(g.class, g.devt);
 	class_destroy(g.class);
 	cdev_del(&g.cdev);
 	unregister_chrdev_region(g.devt, 1);
-	pr_info(DRV_NAME ": unloaded\n");
+
+	pr_info(DRV_NAME ": unloaded (reset cmd sent)\n");
 }
 
 module_init(ampcpu_init);
 module_exit(ampcpu_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("AMP CPU7 loader/starter via PSCI CPU_ON + debugfs");
+MODULE_DESCRIPTION("AMP CPU7 loader/starter via PSCI CPU_ON + debugfs reset");
 MODULE_AUTHOR("hongyang-rp + Copilot");
