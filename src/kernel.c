@@ -84,12 +84,21 @@ static inline void psci_cpu_off(void)
 #define AMP_CMD_IDX  32
 #define AMP_CMD_RESET 0x52534554ULL /* 'RSET' */
 
+extern char vectors[];
+static inline void write_vbar_el1(u64 v)
+{
+	asm volatile("msr vbar_el1, %0" :: "r"(v));
+	asm volatile("isb" ::: "memory");
+}
+
 void kernel_main(void)
 {
 	volatile u64 *shm = (volatile u64 *)0xD7C00000;
 	unsigned long *test = SHM_BASE;
 
+	write_vbar_el1((u64)vectors);
 	arch_local_irq_disable();
+	shm[1] = read_mpidr_el1();
 
 	mem_init(0, 0);
 
@@ -105,6 +114,7 @@ void kernel_main(void)
 	for (volatile u64 i = 0; i < 1000000; i++) ;
 
 	arch_mem_timer_start_hz(10);
+	//arch_mem_timer_find_and_start(10, shm);
 
 	for (volatile u64 i=0;i<5000000;i++);
 
