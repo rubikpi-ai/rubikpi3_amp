@@ -12,3 +12,6 @@ echo 1 > /sys/kernel/debug/ampcpu7/start
 
 # 5) 看状态
 cat /sys/kernel/debug/ampcpu7/status
+
+
+0xd7c00000

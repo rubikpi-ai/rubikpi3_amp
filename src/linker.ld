@@ -50,6 +50,6 @@ SECTIONS
 	_shared_memory = .;
 	. = 0xD8000000;
 	_stack_bottom = .;
-	. = 0xd8800000;
+	. = 0xD87FF000;   /* <== in carveout, 4KB below top, 16B align ok */
 	_stack_top = .;
 }

@@ -4,11 +4,8 @@
 
 static inline void arch_local_irq_enable(void)
 {
-	asm volatile(
-		"msr	daifclr, #2"
-		:
-		:
-		: "memory");
+	asm volatile("msr daifclr, #3" ::: "memory"); /* clear F and I */
+	asm volatile("isb" ::: "memory");
 }
 
 static inline void arch_local_irq_disable(void)
@@ -57,6 +54,7 @@ static inline void write_icc_pmr_el1(u64 v)   { SYSREG_WRITE64("S3_0_C4_C6_0", v
 static inline void write_icc_bpr1_el1(u64 v)  { SYSREG_WRITE64("S3_0_C12_C12_3", v); }
 static inline void write_icc_ctlr_el1(u64 v)  { SYSREG_WRITE64("S3_0_C12_C12_4", v); }
 static inline void write_icc_igrpen1_el1(u64 v){ SYSREG_WRITE64("S3_0_C12_C12_7", v); }
+static inline void write_icc_igrpen0_el1(u64 v){ SYSREG_WRITE64("S3_0_C12_C12_6", v); }
 
 static inline u32 read_icc_iar1_el1(void) {
     u64 v;

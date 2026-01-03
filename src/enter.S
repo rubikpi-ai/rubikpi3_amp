@@ -216,7 +216,7 @@ vectors:
 	 */
 	vtentry el1_sync_invalid
 	vtentry el1_irq
-	vtentry el1_fiq_invalid
+	vtentry el1_fiq
 	vtentry el1_error_invalid
 
 	/* Lower EL using AArch64
@@ -245,8 +245,14 @@ el1_sync_invalid:
 	bl kernel_exit
 
 el1_irq_invalid:
+	ldr x9, =_shared_memory
+	mov x10, #0xFEED
+	str x10, [x9, #0x128]
 	inv_entry 1, BAD_IRQ
 el1_fiq_invalid:
+	ldr x9, =_shared_memory
+	mov x10, #0xFEEA
+	str x10, [x9, #0x128]
 	inv_entry 1, BAD_FIQ
 el1_error_invalid:
 	inv_entry 1, BAD_ERROR
@@ -274,6 +280,12 @@ el1_irq:
 
 //string_test:
 //	.string "t"
+
+el1_fiq:
+	str x30, [sp, -8]!
+	bl kernel_entry
+	bl irq_handler
+	bl kernel_exit
 
 .global trigger_alignment
 trigger_alignment:
