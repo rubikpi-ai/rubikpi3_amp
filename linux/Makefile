@@ -1,5 +1,5 @@
 obj-m += amp.o
-KDIR:=/home/zhy/QCOM/linux/
+KDIR:=/home/tsdl/Qualcomm/linux/
 PWD?=$(shell pwd)
 all:
 	make -C $(KDIR) M=$(PWD) modules

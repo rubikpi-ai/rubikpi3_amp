@@ -20,6 +20,8 @@
 #include <linux/delay.h>
 #include <linux/debugfs.h>
 #include <asm/cacheflush.h>
+#include <asm/io.h>      // virt_to_phys
+#include <linux/kallsyms.h>
 
 #define DRV_NAME "ampcpu7"
 #define DEV_NAME "ampcpu7"
@@ -42,6 +44,9 @@ struct ampcpu_ctx {
 	u64 bytes_loaded;
 	s64 last_psci_ret;
 
+	int boot_via_secondary;     /* 0: use entry_pa; 1: use secondary_entry_va */
+	u64 secondary_entry_va;     /* kernel VA from /proc/kallsyms */
+
 	/* chrdev */
 	dev_t devt;
 	struct cdev cdev;
@@ -59,6 +64,9 @@ static struct ampcpu_ctx g = {
 	.shm_pa = 0xD7C00000ULL,
 	.max_load_size = 10 * 1024 * 1024,
 	.last_psci_ret = 0,
+
+	.boot_via_secondary = 0,
+	.secondary_entry_va = 0,
 };
 
 static int psci_cpu_on(u64 mpidr, phys_addr_t entry_pa)
@@ -212,6 +220,8 @@ static ssize_t dbg_status_read(struct file *f, char __user *ubuf, size_t cnt, lo
 	size_t maxsz;
 	u64 loaded;
 	s64 last;
+	int boot_via_secondary;
+	u64 secondary_entry_va;
 
 	mutex_lock(&g.lock);
 	cpu = g.target_cpu;
@@ -222,6 +232,8 @@ static ssize_t dbg_status_read(struct file *f, char __user *ubuf, size_t cnt, lo
 	loaded = g.bytes_loaded;
 	last = g.last_psci_ret;
 	mutex_unlock(&g.lock);
+	boot_via_secondary = g.boot_via_secondary;
+	secondary_entry_va = g.secondary_entry_va;
 
 	len = scnprintf(buf, sizeof(buf),
 			"target_cpu=%d\n"
@@ -232,6 +244,8 @@ static ssize_t dbg_status_read(struct file *f, char __user *ubuf, size_t cnt, lo
 			"bytes_loaded=0x%llx\n"
 			"cpu_online=%d (must be 0 before start)\n"
 			"last_psci_ret=%lld (0x%llx)\n",
+			"boot_via_secondary=%d\n"
+			"secondary_entry_va=0x%llx\n",
 			cpu,
 			(unsigned long long)mpidr,
 			(unsigned long long)entry,
@@ -239,10 +253,38 @@ static ssize_t dbg_status_read(struct file *f, char __user *ubuf, size_t cnt, lo
 			maxsz,
 			(unsigned long long)loaded,
 			cpu_possible(cpu) ? cpu_online(cpu) : -1,
-			(long long)last, (unsigned long long)last);
+			(long long)last, (unsigned long long)last,
+			boot_via_secondary,
+			(unsigned long long)secondary_entry_va);
 
 	return simple_read_from_buffer(ubuf, cnt, ppos, buf, len);
 }
+
+static phys_addr_t resolve_entry_pa(void)
+{
+	phys_addr_t entry;
+
+	mutex_lock(&g.lock);
+	entry = g.entry_pa;
+
+	if (g.boot_via_secondary) {
+		unsigned long va = (unsigned long)g.secondary_entry_va;
+		if (!va) {
+			mutex_unlock(&g.lock);
+			return 0;
+		}
+
+		/*
+		 * Convert kernel VA -> PA. This relies on linear mapping.
+		 * For secondary_entry (in kernel image) this should be OK.
+		 */
+		entry = (phys_addr_t)virt_to_phys((void *)va);
+	}
+	mutex_unlock(&g.lock);
+
+	return entry;
+}
+
 
 static const struct file_operations dbg_status_fops = {
 	.owner = THIS_MODULE,
@@ -272,6 +314,7 @@ static ssize_t dbg_start_write(struct file *f, const char __user *ubuf, size_t c
 
 	amp_flush_payload(entry, (size_t)flush_sz);
 
+	entry = resolve_entry_pa();
 	ret = psci_cpu_on(mpidr, entry);
 
 	mutex_lock(&g.lock);
@@ -524,6 +567,9 @@ static int __init ampcpu_init(void)
 	debugfs_create_file("entry_pa", 0644, g.dbg_dir, (u64 *)&g.entry_pa, &dbg_u64_fops);
 	debugfs_create_file("shm_pa", 0644, g.dbg_dir, (u64 *)&g.shm_pa, &dbg_u64_fops);
 	debugfs_create_file("max_load_size", 0644, g.dbg_dir, &g.max_load_size, &dbg_size_fops);
+
+	debugfs_create_file("boot_via_secondary", 0644, g.dbg_dir, &g.boot_via_secondary, &dbg_int_fops);
+	debugfs_create_file("secondary_entry_va", 0644, g.dbg_dir, &g.secondary_entry_va, &dbg_u64_fops);
 
 	pr_info(DRV_NAME ": /dev/%s created; debugfs: /sys/kernel/debug/%s/\n",
 		DEV_NAME, DRV_NAME);
