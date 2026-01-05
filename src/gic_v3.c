@@ -324,6 +324,51 @@ void enable_all_ppis(u64 gicr_base)
         mmio_write8(gicr_base + GICR_IPRIORITYR + i, 0x40);
 
     /* enable all SGI/PPI */
-    mmio_write32(gicr_base + GICR_ISENABLER0, 0xFFFFFFFF);
+    //mmio_write32(gicr_base + GICR_ISENABLER0, 0xFFFBFFFF);
+    mmio_write32(gicr_base + GICR_ISENABLER0, 0x8000000);
     dsb(sy); isb();
 }
+
+
+void enable_ppi_mask(u64 gicr_base, u32 mask, u8 prio)
+{
+    u64 sgi = gicr_base + 0x10000;
+
+    /* group1 for those bits */
+    u32 grp = mmio_read32(sgi + 0x0080);
+    grp |= mask;
+    mmio_write32(sgi + 0x0080, grp);
+
+    /* set priority for enabled bits */
+    for (int i = 0; i < 32; i++) {
+        if (mask & (1U << i))
+            mmio_write8(sgi + 0x0400 + i, prio);
+    }
+
+    /* enable */
+    mmio_write32(sgi + 0x0100, mask);
+    dsb(sy); isb();
+}
+
+void disable_all_ppis(u64 gicr_base)
+{
+    u64 sgi = gicr_base + 0x10000;
+    mmio_write32(sgi + 0x0180, 0xFFFFFFFF); /* ICENABLER0 */
+    dsb(sy); isb();
+}
+
+u32 read_ispendr0(u64 gicr_base)
+{
+    u64 sgi = gicr_base + 0x10000;
+    return mmio_read32(sgi + 0x0200);
+}
+
+int find_single_pending_bit(u32 v)
+{
+    if (!v) return -1;
+    /* 返回最低置位 bit index */
+    for (int i = 0; i < 32; i++)
+        if (v & (1U << i)) return i;
+    return -1;
+}
+

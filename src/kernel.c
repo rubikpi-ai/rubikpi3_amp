@@ -69,7 +69,7 @@ void irq_handler(void) {
 	shm[1]++;           /* total irq count */
 	shm[2] = intid;     /* last intid */
 
-	if (intid == 0x26) {
+	if (intid == 0x1b) {
 		shm[3]++;       /* timer tick count */
 	//	arch_mem_timer_ack_and_rearm_hz(10);
 		timer_cntv_reload_hz(10);
@@ -108,12 +108,18 @@ static inline void write_cntp_ctl_el0(u64 v){ __asm__ volatile("msr cntp_ctl_el0
 static inline void write_cntv_ctl_el0(u64 v) {
     __asm__ volatile ("msr cntv_ctl_el0, %0" :: "r"(v));
 }
+
 void timer_cntv_start_hz(u32 hz);
 void timer_start_hz(u32 hz);
+void disable_all_ppis(u64 gicr_base);
+u32 read_ispendr0(u64 gicr_base);
+int find_single_pending_bit(u32 v);
+
 void kernel_main(void)
 {
 	volatile u64 *shm = (volatile u64 *)0xD7C00000;
 	unsigned long *test = SHM_BASE;
+	u64 gicr = 0x17b40000ULL;
 
 	write_vbar_el1((u64)vectors);
 	arch_local_irq_disable();
@@ -131,8 +137,10 @@ void kernel_main(void)
 	gicv3_init_for_cpu();
 //	enable_ppi27(0x17b40000ULL);
 	enable_all_ppis(0x17b40000ULL);
-	__asm__ volatile("msr S3_0_C4_C6_0, %0" :: "r"(0xffUL));
-	__asm__ volatile("msr S3_0_C12_C12_7, %0"::"r"(1UL));
+	write_cntp_ctl_el0(0);
+	write_cntv_ctl_el0(0);
+//	disable_all_ppis(gicr);
+
 	// el1_full_gic_init();
 //	el1_gicd_spi_init();
 
@@ -145,6 +153,12 @@ void kernel_main(void)
 
 
 	arch_local_irq_enable();
+	timer_cntv_start_hz(10);
+	for (volatile u64 i=0;i<5000000;i++);
+	u32 pend = read_ispendr0(gicr);
+	shm[30] = pend;
+	shm[31] = find_single_pending_bit(pend);
+
 
 	//write_cntp_ctl_el0(0);
 	//timer_start_hz(10);
@@ -152,11 +166,11 @@ void kernel_main(void)
 	//arch_ppi_diag_dump();
 	//shm[21] = read_cntv_ctl_el0();
 
-	write_cntp_ctl_el0(0);
-	write_cntv_ctl_el0(0);
-	timer_cntv_start_hz(10);
-	for (volatile u64 i=0;i<5000000;i++);
-	arch_ppi27_diag_dump();
+	//write_cntp_ctl_el0(0);
+	//write_cntv_ctl_el0(0);
+	//timer_cntv_start_hz(10);
+	//for (volatile u64 i=0;i<5000000;i++);
+	//arch_ppi27_diag_dump();
 
 	test[20] = 0x2020208;
 	shm[21] = read_cntv_ctl_el0();
