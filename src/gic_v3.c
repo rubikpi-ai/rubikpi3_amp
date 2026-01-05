@@ -61,11 +61,13 @@ static u64 gicr_base_this_cpu(void) {
  *  - write_icc_eoir1_el1 / write_icc_dir_el1
  */
 
-u32 gicv3_iar1(void) {
+u32 gicv3_iar1(void)
+{
 	return read_icc_iar1_el1();
 }
 
-void gicv3_eoi1(u32 iar) {
+void gicv3_eoi1(u32 iar)
+{
 	write_icc_eoir1_el1(iar);
 	write_icc_dir_el1(iar);
 	isb();

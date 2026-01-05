@@ -28,5 +28,7 @@ void enable_ppi(u64 gicr_base, u8 ppi_num, u8 prio);
 void disable_all_ppis(u64 gicr_base);
 void write_cntp_ctl_el0(u64 v);
 void write_cntv_ctl_el0(u64 v);
+void gicv3_eoi1(u32 iar);
+u32 gicv3_iar1(void);
 
 #endif // _GIC_V3_H_

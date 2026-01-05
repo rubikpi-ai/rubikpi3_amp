@@ -57,7 +57,8 @@ void bad_mode(struct pt_regs *regs, int reason, unsigned int esr)
 
 static volatile u64 * const shm = (volatile u64 *)SHM_BASE;
 
-void irq_handler(void) {
+void irq_handler(void)
+{
 	u32 iar = gicv3_iar1();
 	u32 intid = iar & 0x3ff;
 
