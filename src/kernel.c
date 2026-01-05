@@ -57,13 +57,9 @@ void bad_mode(struct pt_regs *regs, int reason, unsigned int esr)
 
 static volatile u64 * const shm = (volatile u64 *)SHM_BASE;
 
-void arch_mem_timer_ack_and_rearm_hz(u32 hz);
 void irq_handler(void) {
 	u32 iar = gicv3_iar1();
 	u32 intid = iar & 0x3ff;
-	//u32 t = arch_mem_timer_active_spi();
-
-	if (intid == 1023) return; /* spurious */
 
 	shm[0] = 0x1111222233334444ULL;
 	shm[1]++;           /* total irq count */
@@ -71,8 +67,7 @@ void irq_handler(void) {
 
 	if (intid == 0x1b) {
 		shm[3]++;       /* timer tick count */
-	//	arch_mem_timer_ack_and_rearm_hz(10);
-		timer_cntv_reload_hz(10);
+		timer_cntv_reload_hz(1000);
 	}
 
 	gicv3_eoi1(iar);
@@ -87,41 +82,12 @@ static inline void psci_cpu_off(void)
 #define AMP_CMD_IDX  32
 #define AMP_CMD_RESET 0x52534554ULL /* 'RSET' */
 
-extern char vectors[];
-static inline void write_vbar_el1(u64 v)
-{
-	asm volatile("msr vbar_el1, %0" :: "r"(v));
-	asm volatile("isb" ::: "memory");
-}
-
-void arch_mem_timer_cntacr_enable_all(volatile u64 *shm);
-void arch_ppi27_diag_dump(void);
-void enable_ppi27(u64 gicr_base);
-void enable_all_ppis(u64 gicr_base);
-
-static inline u64 read_cntv_ctl_el0(void)
-{
-    u64 v; __asm__ volatile("mrs %0, cntv_ctl_el0" : "=r"(v)); return v;
-}
-
-static inline void write_cntp_ctl_el0(u64 v){ __asm__ volatile("msr cntp_ctl_el0, %0"::"r"(v)); }
-static inline void write_cntv_ctl_el0(u64 v) {
-    __asm__ volatile ("msr cntv_ctl_el0, %0" :: "r"(v));
-}
-
-void timer_cntv_start_hz(u32 hz);
-void timer_start_hz(u32 hz);
-void disable_all_ppis(u64 gicr_base);
-u32 read_ispendr0(u64 gicr_base);
-int find_single_pending_bit(u32 v);
-
 void kernel_main(void)
 {
 	volatile u64 *shm = (volatile u64 *)0xD7C00000;
 	unsigned long *test = SHM_BASE;
 	u64 gicr = 0x17b40000ULL;
 
-	write_vbar_el1((u64)vectors);
 	arch_local_irq_disable();
 	shm[1] = read_mpidr_el1();
 
@@ -135,51 +101,21 @@ void kernel_main(void)
 	gpio_direction_output(44, 0);
 
 	gicv3_init_for_cpu();
-//	enable_ppi27(0x17b40000ULL);
-	enable_all_ppis(0x17b40000ULL);
-	write_cntp_ctl_el0(0);
+	enable_ppi(gicr, 27, 0x40);
 	write_cntv_ctl_el0(0);
-//	disable_all_ppis(gicr);
-
-	// el1_full_gic_init();
-//	el1_gicd_spi_init();
 
 	for (volatile u64 i = 0; i < 1000000; i++) ;
 
-	//arch_mem_timer_start_hz(10);
-	//arch_mem_timer_cntacr_enable_all(shm);
-	//arch_mem_timer_probe_frames(10, shm, 0);
-	//arch_mem_timer_find_and_start(10, shm);
-
-
 	arch_local_irq_enable();
-	timer_cntv_start_hz(10);
+	timer_cntv_start_hz(1000);
 	for (volatile u64 i=0;i<5000000;i++);
-	u32 pend = read_ispendr0(gicr);
-	shm[30] = pend;
-	shm[31] = find_single_pending_bit(pend);
-
-
-	//write_cntp_ctl_el0(0);
-	//timer_start_hz(10);
-	//for (volatile u64 i=0;i<5000000;i++);
-	//arch_ppi_diag_dump();
-	//shm[21] = read_cntv_ctl_el0();
-
-	//write_cntp_ctl_el0(0);
-	//write_cntv_ctl_el0(0);
-	//timer_cntv_start_hz(10);
-	//for (volatile u64 i=0;i<5000000;i++);
-	//arch_ppi27_diag_dump();
 
 	test[20] = 0x2020208;
-	shm[21] = read_cntv_ctl_el0();
 
 	while (1) {
 		__asm__ volatile ("wfi");
 		shm[4] = shm[4] + 1;
 	}
-
 
 	return;
 }
