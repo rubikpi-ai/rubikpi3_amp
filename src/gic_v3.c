@@ -287,11 +287,6 @@ void el1_gicd_spi_init(u32 spi, u8 prio, u64 mpidr)
 #define GICR_SGI_BASE   0x10000
 #define GICR_IGROUPR0   (GICR_SGI_BASE + 0x0080)
 #define GICR_ISENABLER0 (GICR_SGI_BASE + 0x0100)
-#define GICR_ICENABLER0 (GICR_SGI_BASE + 0x0180)
-#define GICR_ISPENDR0   (GICR_SGI_BASE + 0x0200)
-#define GICR_ICPENDR0   (GICR_SGI_BASE + 0x0280)
-#define GICR_ISACTIVER0 (GICR_SGI_BASE + 0x0300)
-#define GICR_ICACTIVER0 (GICR_SGI_BASE + 0x0380)
 #define GICR_IPRIORITYR (GICR_SGI_BASE + 0x0400)
 #define GICR_ICFGR1     (GICR_SGI_BASE + 0x0C04)
 
@@ -331,57 +326,4 @@ void enable_all_ppis(u64 gicr_base)
     /* enable all SGI/PPI */
     mmio_write32(gicr_base + GICR_ISENABLER0, 0xFFFFFFFF);
     dsb(sy); isb();
-}
-
-/*
- * Disable all PPIs to prevent interrupt storms.
- * This clears all enabled SGI/PPI interrupts (0..31).
- */
-void disable_all_ppis(u64 gicr_base)
-{
-    /* Disable all SGI/PPI (write 1 to clear) */
-    mmio_write32(gicr_base + GICR_ICENABLER0, 0xFFFFFFFF);
-    dsb(sy); isb();
-}
-
-/*
- * Enable specific PPIs by mask.
- * @gicr_base: GICR base address for this CPU
- * @mask: bitmask of PPIs to enable (bit N = PPI N)
- * @prio: priority to assign (0x00=highest, 0xFF=lowest)
- */
-void enable_ppi_mask(u64 gicr_base, u32 mask, u8 prio)
-{
-    /* Set Group1 for requested PPIs */
-    u32 grp = mmio_read32(gicr_base + GICR_IGROUPR0);
-    grp |= mask;
-    mmio_write32(gicr_base + GICR_IGROUPR0, grp);
-    
-    /* Set priority for each enabled PPI */
-    for (int i = 0; i < 32; i++) {
-        if (mask & (1U << i)) {
-            mmio_write8(gicr_base + GICR_IPRIORITYR + i, prio);
-        }
-    }
-    
-    /* Enable the PPIs */
-    mmio_write32(gicr_base + GICR_ISENABLER0, mask);
-    dsb(sy); isb();
-}
-
-/*
- * Enable a single PPI interrupt.
- * @gicr_base: GICR base address for this CPU
- * @intid: PPI interrupt ID (16..31)
- * @prio: priority to assign
- */
-void enable_only_ppi(u64 gicr_base, u32 intid, u8 prio)
-{
-    if (intid > 31) return; /* out of range */
-    
-    /* Disable all PPIs first */
-    disable_all_ppis(gicr_base);
-    
-    /* Enable just this one */
-    enable_ppi_mask(gicr_base, (1U << intid), prio);
 }

@@ -57,48 +57,24 @@ void bad_mode(struct pt_regs *regs, int reason, unsigned int esr)
 
 static volatile u64 * const shm = (volatile u64 *)SHM_BASE;
 
-/* Global variable to store discovered CNTV PPI and configured Hz */
-static u32 g_cntv_ppi = 0;
-static u32 g_cntv_hz = 100;
-
-/* GICR offsets for debug logging */
-#define GICR_SGI_BASE   0x10000
-#define GICR_ISPENDR0   (GICR_SGI_BASE + 0x0200)
-#define GICR_ISACTIVER0 (GICR_SGI_BASE + 0x0300)
-
-static inline u32 mmio_read32(u64 a) { return *(volatile u32 *)a; }
-
 void arch_mem_timer_ack_and_rearm_hz(u32 hz);
 void irq_handler(void) {
 	u32 iar = gicv3_iar1();
 	u32 intid = iar & 0x3ff;
-	
+	//u32 t = arch_mem_timer_active_spi();
+
 	if (intid == 1023) return; /* spurious */
-	
-	/* Enhanced debug logging - record IRQ state to shared memory
-	 * Layout:
-	 *  shm[0]  = magic marker
-	 *  shm[1]  = total IRQ count
-	 *  shm[2]  = last intid
-	 *  shm[3]  = timer tick count
-	 *  shm[4]  = wfi count (set in main loop)
-	 *  shm[10] = last GICR_ISPENDR0 value
-	 *  shm[11] = last GICR_ISACTIVER0 value
-	 */
-	u64 gicr_base = 0x17b40000ULL; /* CPU7 GICR base */
-	
-	shm[0] = 0x4952514841444C52ULL; /* "IRQHANDLR" */
+
+	shm[0] = 0x1111222233334444ULL;
 	shm[1]++;           /* total irq count */
 	shm[2] = intid;     /* last intid */
-	shm[10] = mmio_read32(gicr_base + GICR_ISPENDR0);
-	shm[11] = mmio_read32(gicr_base + GICR_ISACTIVER0);
-	
-	/* Handle CNTV timer interrupt if it matches discovered PPI */
-	if (g_cntv_ppi && intid == g_cntv_ppi) {
+
+	if (intid == 0x26) {
 		shm[3]++;       /* timer tick count */
-		timer_cntv_reload_hz(g_cntv_hz);
+	//	arch_mem_timer_ack_and_rearm_hz(10);
+		timer_cntv_reload_hz(10);
 	}
-	
+
 	gicv3_eoi1(iar);
 }
 
@@ -138,7 +114,6 @@ void kernel_main(void)
 {
 	volatile u64 *shm = (volatile u64 *)0xD7C00000;
 	unsigned long *test = SHM_BASE;
-	u64 gicr_base = 0x17b40000ULL; /* CPU7 GICR */
 
 	write_vbar_el1((u64)vectors);
 	arch_local_irq_disable();
@@ -154,60 +129,37 @@ void kernel_main(void)
 	gpio_direction_output(44, 0);
 
 	gicv3_init_for_cpu();
-	
-	/* 
-	 * IMPORTANT FIX: Do NOT enable all PPIs blindly!
-	 * This was causing interrupt storms. Instead:
-	 * 1. Disable all PPIs first
-	 * 2. Discover which PPI corresponds to CNTV
-	 * 3. Enable only that specific PPI
-	 */
-	// OLD CODE (caused interrupt storm):
-	// enable_all_ppis(0x17b40000ULL);
-	
-	/* Ensure all timers are stopped */
-	write_cntp_ctl_el0(0);
-	write_cntv_ctl_el0(0);
-	
-	/* Disable all PPIs to start clean */
-	disable_all_ppis(gicr_base);
-	
-	/* Ensure ICC settings are correct */
-	__asm__ volatile("msr S3_0_C4_C6_0, %0" :: "r"(0xffUL));  /* PMR */
-	__asm__ volatile("msr S3_0_C12_C12_7, %0"::"r"(1UL));     /* IGRPEN1 */
+//	enable_ppi27(0x17b40000ULL);
+	enable_all_ppis(0x17b40000ULL);
+	__asm__ volatile("msr S3_0_C4_C6_0, %0" :: "r"(0xffUL));
+	__asm__ volatile("msr S3_0_C12_C12_7, %0"::"r"(1UL));
+	// el1_full_gic_init();
+//	el1_gicd_spi_init();
 
 	for (volatile u64 i = 0; i < 1000000; i++) ;
 
-	/* Phase 1: Discover which PPI corresponds to CNTV timer */
-	shm[50] = 0x5048415345310000ULL; /* "PHASE1" marker */
-	g_cntv_ppi = cntv_ppi_discover(gicr_base);
-	shm[51] = g_cntv_ppi; /* Save discovered PPI for visibility */
-	
-	/* Phase 2: Configure timer frequency (default 100Hz, range 100-10000) */
-	g_cntv_hz = 100; /* Can be changed to any value in range 100-10000 */
-	shm[52] = g_cntv_hz;
-	
-	/* Phase 3: Enable only the discovered CNTV PPI */
-	if (g_cntv_ppi) {
-		shm[53] = 0x454E41424C450000ULL; /* "ENABLE" marker */
-		enable_only_ppi(gicr_base, g_cntv_ppi, 0x80);
-	} else {
-		shm[53] = 0x4641494C45440000ULL; /* "FAILED" marker */
-	}
+	//arch_mem_timer_start_hz(10);
+	//arch_mem_timer_cntacr_enable_all(shm);
+	//arch_mem_timer_probe_frames(10, shm, 0);
+	//arch_mem_timer_find_and_start(10, shm);
+
 
 	arch_local_irq_enable();
 
-	/* Optional: Run diagnostic dump for debugging */
+	//write_cntp_ctl_el0(0);
+	//timer_start_hz(10);
+	//for (volatile u64 i=0;i<5000000;i++);
+	//arch_ppi_diag_dump();
+	//shm[21] = read_cntv_ctl_el0();
+
+	write_cntp_ctl_el0(0);
+	write_cntv_ctl_el0(0);
+	timer_cntv_start_hz(10);
 	for (volatile u64 i=0;i<5000000;i++);
 	arch_ppi27_diag_dump();
 
-	/* Phase 4: Start CNTV timer if PPI was discovered */
-	if (g_cntv_ppi) {
-		shm[54] = 0x535441525400ULL; /* "START" marker */
-		timer_cntv_start_hz(g_cntv_hz);
-		test[20] = 0x2020208;
-		shm[21] = read_cntv_ctl_el0();
-	}
+	test[20] = 0x2020208;
+	shm[21] = read_cntv_ctl_el0();
 
 	while (1) {
 		__asm__ volatile ("wfi");
