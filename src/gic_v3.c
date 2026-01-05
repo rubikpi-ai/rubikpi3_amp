@@ -127,21 +127,6 @@ void gicv3_init_for_cpu(void) {
 	volatile u64 *shm = (volatile u64 *)0xD7C00000;
     u64 rd = gicr_base_this_cpu();
 
-	shm[70] = rd;
-	shm[76] = mmio_read64(rd + 0x0008); /* GICR_TYPER */
-	shm[77] = mmio_read32(rd + 0x0014); /* GICR_WAKER */
-	shm[78] = mmio_read32(rd + 0x0000); /* GICR_CTLR (RD frame) */
-
-	/* prove SGI/PPI frame base */
-	{
-		u64 sgi = rd + 0x10000;
-		shm[79] = sgi;
-		shm[80] = mmio_read32(sgi + 0x0080); /* IGROUPR0 */
-		shm[81] = mmio_read32(sgi + 0x0100); /* ISENABLER0 */
-		shm[82] = mmio_read32(sgi + 0x0180); /* ICENABLER0 */
-		shm[83] = *(volatile u8 *)(sgi + 0x0400 + 27); /* IPRIORITYR[27] */
-	}
-
     /* Wake redistributor */
     u64 waker = rd + 0x0014; /* GICR_WAKER */
     u32 v = mmio_read32(waker);
@@ -167,14 +152,6 @@ void gicv3_init_for_cpu(void) {
     write_icc_igrpen1_el1(1); /* enable Group1 */
 	write_icc_igrpen0_el1(1);
     isb();
-
-	{
-        u64 sgi = rd + 0x10000;
-        u64 igroupr0 = sgi + 0x0080;
-        u64 isenabler0 = sgi + 0x0100;
-        shm[71] = mmio_read32(igroupr0);
-        shm[72] = mmio_read32(isenabler0);
-    }
 }
 
 /* Enable a PPI/SGI (0..31) on this CPU */
@@ -266,4 +243,87 @@ void gicv3_enable_spi(u32 intid, u8 prio, u64 mpidr)
 
     /* enable */
     mmio_write32(GICD_BASE + GICD_ISENABLER(n), (1U << bit));
+}
+
+void el1_full_gic_init(void)
+{
+    // 1. Enable ICC_SRE_EL1 (System Register Interface)
+    u64 sre = read_icc_sre_el1();
+    sre |= 1U;      // SRE=1
+    sre &= ~(1U << 2); // DIB=0
+    sre &= ~(1U << 3); // DFB=0
+    write_icc_sre_el1(sre);
+    asm volatile("isb" ::: "memory");
+
+    // 2. Set Priority Mask, Allow all priorities (default Linux is PMR=0xff)
+    write_icc_pmr_el1(0xFF);
+
+    // 3. Set Binary Point (BPR1), Group1, Linux默认0
+    write_icc_bpr1_el1(0);
+
+    // 4. Enable/disallow any interrupt routing trapping; ICC_CTLR_EL1
+    write_icc_ctlr_el1(0); // Usually EOImode=0, APM=0 (EOI model可改，但建议和Linux一致)
+
+    asm volatile("isb" ::: "memory");
+
+    // 5. Group enable: ICC_IGRPEN1_EL1 for Group 1 (NS interrupts)
+    write_icc_igrpen1_el1(1);
+    //   Group 0 (usually unused for NS EL1,但可直接enable)
+    write_icc_igrpen0_el1(1);
+
+    asm volatile("isb" ::: "memory");
+}
+
+void el1_gicd_spi_init(u32 spi, u8 prio, u64 mpidr)
+{
+    // Route SPI to this core
+    gicv3_route_spi_to_self(spi, mpidr);
+    // Enable SPI
+    gicv3_enable_spi(spi, prio, mpidr);
+    // 其它: affinity, group, priority, enable全部搞定
+}
+
+
+#define GICR_SGI_BASE   0x10000
+#define GICR_IGROUPR0   (GICR_SGI_BASE + 0x0080)
+#define GICR_ISENABLER0 (GICR_SGI_BASE + 0x0100)
+#define GICR_IPRIORITYR (GICR_SGI_BASE + 0x0400)
+#define GICR_ICFGR1     (GICR_SGI_BASE + 0x0C04)
+
+#define PPI27 27
+
+static inline void mmio_write8(u64 a, u8 v){ *(volatile u8 *)a = v; }
+
+static inline void write_cntp_tval_el0(u64 v){ __asm__ volatile("msr cntp_tval_el0, %0"::"r"(v)); }
+static inline void write_cntp_ctl_el0(u64 v){ __asm__ volatile("msr cntp_ctl_el0, %0"::"r"(v)); }
+static inline u64 read_cntfrq_el0(void){ u64 v; __asm__ volatile("mrs %0, cntfrq_el0":"=r"(v)); return v; }
+
+void enable_ppi27(u64 gicr_base)
+{
+    /* group1 */
+    u32 grp = mmio_read32(gicr_base + GICR_IGROUPR0);
+    grp |= (1U << PPI27);
+    mmio_write32(gicr_base + GICR_IGROUPR0, grp);
+
+    /* priority: pick high priority for debug (smaller = higher). use 0x40 */
+    mmio_write8(gicr_base + GICR_IPRIORITYR + PPI27, 0x40);
+
+    /* config: usually level for timer PPIs; leave as 0 unless你要强制 edge */
+    /* enable */
+    mmio_write32(gicr_base + GICR_ISENABLER0, (1U << PPI27));
+    dsb(sy); isb();
+}
+
+void enable_all_ppis(u64 gicr_base)
+{
+    /* group1 all */
+    mmio_write32(gicr_base + GICR_IGROUPR0, 0xFFFFFFFF);
+
+    /* priority all to 0x40 */
+    for (int i = 0; i < 32; i++)
+        mmio_write8(gicr_base + GICR_IPRIORITYR + i, 0x40);
+
+    /* enable all SGI/PPI */
+    mmio_write32(gicr_base + GICR_ISENABLER0, 0xFFFFFFFF);
+    dsb(sy); isb();
 }
