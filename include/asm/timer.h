@@ -8,4 +8,12 @@ void arch_mem_timer_start_hz(u32 hz);
 void arch_mem_timer_ack_and_rearm(void);
 int arch_mem_timer_probe_frames(u32 hz, volatile u64 *shm, int include_frame0);
 
+/* CNTV virtual timer functions */
+void timer_cntv_start_hz(u32 hz);
+void timer_cntv_reload_hz(u32 hz);
+void timer_cntv_stop(void);
+
+/* CNTV PPI discovery */
+u32 cntv_ppi_discover(u64 gicr_base);
+
 #endif // _TIMER_H_

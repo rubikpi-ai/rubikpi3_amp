@@ -73,3 +73,7 @@ void timer_cntv_reload_hz(u32 hz) {
     u64 ticks = frq / hz;
     write_cntv_tval_el0(ticks);
 }
+
+void timer_cntv_stop(void) {
+    write_cntv_ctl_el0(0); /* disable timer */
+}
