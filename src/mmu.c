@@ -193,6 +193,11 @@ static void create_mmio_mapping(void)
 			0x10000, PROT_DEVICE_nGnRnE,
 			early_pgtable_alloc,
 			0);
+
+	__create_pgd_mapping((pgd_t *)idmap_pg_dir, 0x00988000UL, 0x00988000ULL,
+			0x4000, PROT_DEVICE_nGnRnE,
+			early_pgtable_alloc,
+			0);
 }
 
 static void cpu_init(void)

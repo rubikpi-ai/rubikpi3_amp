@@ -101,6 +101,9 @@ void kernel_main(void)
 	gpio_pinmux_set(44, mux_gpio);
 	gpio_direction_output(44, 0);
 
+	// uart2_puts("CPU7 baremetal: uart2 log online (reuse Linux init)\n");
+	uart2_debug_dump_and_try_tx(shm, 200, "BM: uart2 test 123\n");
+
 	gicv3_init_for_cpu();
 	enable_ppi(gicr, 27, 0x40);
 	write_cntv_ctl_el0(0);
@@ -113,7 +116,15 @@ void kernel_main(void)
 
 	test[20] = 0x2020208;
 
+	//uart2_puts("tick started @1000Hz\n");
+
 	while (1) {
+		int ch = uart2_getc_nonblock();
+		if (ch >= 0) {
+			/* echo for quick test */
+			uart2_putc((char)ch);
+		}
+
 		__asm__ volatile ("wfi");
 		shm[4] = shm[4] + 1;
 	}
