@@ -57,6 +57,8 @@ void bad_mode(struct pt_regs *regs, int reason, unsigned int esr)
 
 static volatile u64 * const shm = (volatile u64 *)SHM_BASE;
 
+u64 jiffies = 0;
+
 void irq_handler(void)
 {
 	u32 iar = gicv3_iar1();
@@ -68,6 +70,7 @@ void irq_handler(void)
 
 	if (intid == 0x1b) {
 		shm[3]++;       /* timer tick count */
+	//	jiffies++;
 		timer_cntv_reload_hz(1000);
 	}
 
@@ -83,6 +86,7 @@ static inline void psci_cpu_off(void)
 #define AMP_CMD_IDX  32
 #define AMP_CMD_RESET 0x52534554ULL /* 'RSET' */
 
+void uart2_init(void);
 void kernel_main(void)
 {
 	volatile u64 *shm = (volatile u64 *)0xD7C00000;
@@ -95,14 +99,19 @@ void kernel_main(void)
 	mem_init(0, 0);
 
 	paging_init();
+//	uart2_init_115200()
+	uart2_init();
+//	init_printk_done();
 
 	gpio_pinmux_set(14, mux_gpio);
 	gpio_direction_output(14, 1);
 	gpio_pinmux_set(44, mux_gpio);
 	gpio_direction_output(44, 0);
 
-	// uart2_puts("CPU7 baremetal: uart2 log online (reuse Linux init)\n");
-	uart2_debug_dump_and_try_tx(shm, 200, "BM: uart2 test 123\n");
+	//uart2_puts("CPU7 baremetal: uart2 log online (reuse Linux init)\n");
+	//uart2_debug_dump_and_try_tx(shm, 200, "BM: uart2 test 123\n");
+	uart2_puts("hello world\n");
+	printk("CPU7 baremetal: uart2 log online (reuse Linux init)\n");
 
 	gicv3_init_for_cpu();
 	enable_ppi(gicr, 27, 0x40);
@@ -119,12 +128,6 @@ void kernel_main(void)
 	//uart2_puts("tick started @1000Hz\n");
 
 	while (1) {
-		int ch = uart2_getc_nonblock();
-		if (ch >= 0) {
-			/* echo for quick test */
-			uart2_putc((char)ch);
-		}
-
 		__asm__ volatile ("wfi");
 		shm[4] = shm[4] + 1;
 	}

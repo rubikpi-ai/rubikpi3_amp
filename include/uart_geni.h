@@ -45,7 +45,14 @@
 
 void uart2_putc(char c);
 void uart2_puts(const char *s);
-int uart2_getc_nonblock(void);
+// int uart2_getc_nonblock(void);
+
+/* Public API */
+//void uart2_init_115200(void);
+int  uart2_write(const void *buf, u32 len);   /* returns 0 on success */
+
+/* Optional debug dump to shared memory */
+void uart2_debug_dump(volatile u64 *shm, u32 shm_base_idx);
 
 void uart2_debug_dump_and_try_tx(volatile u64 *shm, u32 shm_base_idx,
 				const char *msg);
