@@ -12,6 +12,7 @@
 #include <asm/irq.h>
 #include <asm/gic_v3.h>
 #include <asm/timer.h>
+#include <gcc_sc7280.h>
 
 extern char _shared_memory[];
 extern char _stack_bottom[];
@@ -99,19 +100,21 @@ void kernel_main(void)
 	mem_init(0, 0);
 
 	paging_init();
-//	uart2_init_115200()
-	uart2_init();
-//	init_printk_done();
+	// uart2_init();
 
 	gpio_pinmux_set(14, mux_gpio);
 	gpio_direction_output(14, 1);
 	gpio_pinmux_set(44, mux_gpio);
 	gpio_direction_output(44, 0);
 
-	//uart2_puts("CPU7 baremetal: uart2 log online (reuse Linux init)\n");
-	//uart2_debug_dump_and_try_tx(shm, 200, "BM: uart2 test 123\n");
-	uart2_puts("hello world\n");
-	printk("CPU7 baremetal: uart2 log online (reuse Linux init)\n");
+	gpio_pinmux_set(10, mux_qup02);
+	gpio_pinmux_set(11, mux_qup02);
+
+	test[21] = 0x2020208;
+	// gcc_enable_uart2_clocks();
+	test[22] = 0x2020208;
+
+	// uart2_puts("hello world\n");
 
 	gicv3_init_for_cpu();
 	enable_ppi(gicr, 27, 0x40);
@@ -125,7 +128,6 @@ void kernel_main(void)
 
 	test[20] = 0x2020208;
 
-	//uart2_puts("tick started @1000Hz\n");
 
 	while (1) {
 		__asm__ volatile ("wfi");
