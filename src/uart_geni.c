@@ -3,6 +3,7 @@
 #include <uart_geni.h>
 #include <gcc_sc7280.h>
 #include <asm/gpio.h>
+#include <gcc_uart2_clk.h>
 
 /* fallback */
 #ifndef UART_TX_FIFO_DEPTH_WORDS_DEFAULT
@@ -70,7 +71,6 @@ static inline void w32(u64 off, u32 v) { writel(v, (u32)(UART2_BASE + off)); }
 #define UART_TX_PAR_EN              (1U << 0)
 #define UART_CTS_MASK               (1U << 1)
 #define UART_RX_PAR_EN              (1U << 3)
-
 #define TX_STOP_BIT_LEN_1           0
 
 /* ---------- delay/poll ---------- */
@@ -89,8 +89,6 @@ static int poll_m_done(u32 timeout_us)
 	}
 	return -1;
 }
-
-static inline u32 ceil_div_u32(u32 a, u32 b) { return (a + b - 1U) / b; }
 
 static u32 uart2_tx_fifo_depth_words(void)
 {
@@ -125,7 +123,6 @@ static int uart2_check_uart_proto(void)
 
 static void uart2_set_8n1_no_fc(void)
 {
-	/* ignore CTS, no parity, 8bit, 1 stop */
 	u32 txcfg = UART_CTS_MASK;
 	txcfg &= ~UART_TX_PAR_EN;
 
@@ -137,22 +134,38 @@ static void uart2_set_8n1_no_fc(void)
 	w32(SE_UART_TX_WORD_LEN, 8);
 	w32(SE_UART_RX_WORD_LEN, 8);
 	w32(SE_UART_TX_STOP_BIT_LEN, TX_STOP_BIT_LEN_1);
-
-	/* stale cnt: optional */
 	w32(SE_UART_RX_STALE_CNT, 0);
 }
 
-static void uart2_set_clk(u32 clk_sel, u32 src_hz, u32 baud, u32 sampling)
+/* -------- Linux-style set_rate (关键修复) -------- */
+#ifndef QUP_SE_VERSION_2_5
+#define QUP_SE_VERSION_2_5 0x2500
+#endif
+
+static int uart2_set_baud_linux_style(u32 baud)
 {
-	u32 div = ceil_div_u32(src_hz, baud * sampling);
-	if (!div) div = 1;
+	u32 sampling = UART_OVERSAMPLING_DEFAULT; /* 32 */
+	u32 ver = qup_wrap0_hw_version();
+	if (ver >= QUP_SE_VERSION_2_5)
+		sampling >>= 1; /* 16 */
 
-	u32 cfg = SER_CLK_EN | (div << CLK_DIV_SHFT);
+	u32 req = baud * sampling;
 
-	w32(SE_GENI_CLK_SEL, clk_sel);
-	w32(GENI_SER_M_CLK_CFG, cfg);
-	w32(GENI_SER_S_CLK_CFG, cfg);
+	u32 clk_idx = 0, clk_rate = 0;
+	if (gcc_uart2_se_clk_config_for_req(req, &clk_idx, &clk_rate) != 0)
+		return -1;
+
+	u32 clk_div = (clk_rate + req - 1U) / req;
+	if (!clk_div) clk_div = 1;
+
+	u32 ser_clk_cfg = SER_CLK_EN | (clk_div << CLK_DIV_SHFT);
+
+	w32(GENI_SER_M_CLK_CFG, ser_clk_cfg);
+	w32(GENI_SER_S_CLK_CFG, ser_clk_cfg);
+	w32(SE_GENI_CLK_SEL, clk_idx & CLK_SEL_MSK);
 	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
+
+	return 0;
 }
 
 /* ---------- TX ---------- */
@@ -167,11 +180,9 @@ static int uart2_tx_bytes(const u8 *p, u32 len)
 		w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
 	}
 
-	/* clear irq */
 	u32 mis = r32(SE_GENI_M_IRQ_STATUS);
 	if (mis) w32(SE_GENI_M_IRQ_CLEAR, mis);
 
-	/* start tx */
 	w32(SE_UART_TX_TRANS_LEN, len);
 	w32(SE_GENI_M_CMD0, (UART_START_TX << M_OPCODE_SHFT));
 
@@ -207,89 +218,32 @@ void uart2_puts(const char *s)
 	}
 }
 
-/*
- * Core: exhaustive scan to lock correct tuple:
- *  - clk_sel: 0..15
- *  - sampling: 32 or 16
- *  - src_hz: common candidates
- *
- * You watch host terminal: only one tuple will produce readable ASCII.
- */
-static void uart2_scan_all(void)
+int uart2_write(const void *buf, u32 len)
 {
-	static const u32 src_list[] = {
-	//	19200000,
-	//	14745600,
-	//	7372800,
-		32000000,
-	//	50000000,
-	//	75000000,
-	//	100000000
-	};
-	static const u32 sampling_list[] = {
-		//32,
-		16,
-	};
-
-	const u32 baud = 115200;
-
-	uart2_set_clk(2, 32000000, 115200, 16);
-	udelay_local(300);
-
-	uart2_puts("\n--- UART2 GENI Scan Start ---\n");
-	return;
-
-
-	for (u32 si = 0; si < (u32)(sizeof(sampling_list)/sizeof(sampling_list[0])); si++) {
-		u32 sampling = sampling_list[si];
-
-		for (u32 hi = 0; hi < (u32)(sizeof(src_list)/sizeof(src_list[0])); hi++) {
-			u32 src_hz = src_list[hi];
-
-			for (u32 sel = 0; sel < 8; sel++) {
-				uart2_set_clk(sel, src_hz, baud, sampling);
-
-				/* send a distinctive pattern:
-				 * 0x55 helps measure baud; and "SEL=.. SRC=.. SMP=.."
-				 */
-				//uart2_puts("\n[BM] SEL=");
-				uart2_putc('0' + (sel / 10));
-				uart2_putc('0' + (sel % 10));
-				//uart2_puts(" SRC=");
-				/* print src_hz in a very simple way: just index */
-				uart2_putc('0' + (char)hi);
-				//uart2_puts(" SMP=");
-				//uart2_putc((sampling == 32) ? '3' : '1');
-				//uart2_putc('6');
-				//uart2_puts(" 55=");
-				//for (int k = 0; k < 32; k++) uart2_putc(0x55);
-				//uart2_puts(" END\n");
-
-				udelay_local(300);
-			}
-		}
-	}
+	return uart2_tx_bytes((const u8*)buf, len);
 }
 
 int uart2_init(unsigned int baud, unsigned long src_clk_hz, unsigned int clk_sel)
 {
-	(void)baud; (void)src_clk_hz; (void)clk_sel;
+	(void)src_clk_hz;
+	(void)clk_sel;
 
 	gpio_pinmux_set(10, mux_qup02);
 	gpio_pinmux_set(11, mux_qup02);
 
+	/* 1) 必须先开 branch gate（否则完全无输出） */
 	gcc_enable_uart2_clocks();
 
+	/* 2) 恢复 SE 状态 */
 	uart2_cancel_abort();
 	uart2_force_cfg_trigger();
 
+	/* 3) 配 8N1 */
 	uart2_set_8n1_no_fc();
 
-	/* scan to find correct tuple */
-	uart2_scan_all();
-
-	/* After you find the correct tuple from terminal output,
-	   replace uart2_scan_all() with a single uart2_set_clk(sel, src_hz, 115200, sampling); */
+	/* 4) 最后设波特率（会调用 RCG2 set_rate + enable branch + GENI divider/clk_sel） */
+	if (uart2_set_baud_linux_style(baud ? baud : 115200) != 0)
+		return -1;
 
 	return 0;
 }

@@ -103,7 +103,7 @@ void kernel_main(void)
 
 	//uart2_init();
 	uart2_init(115200, 19200000, 0);
-	//uart2_puts("uart2 hello\n");
+	uart2_puts("uart2 hello\n");
 
 	gpio_pinmux_set(14, mux_gpio);
 	gpio_direction_output(14, 1);
