@@ -12,7 +12,6 @@
 #include <asm/irq.h>
 #include <asm/gic_v3.h>
 #include <asm/timer.h>
-#include <gcc_sc7280.h>
 
 extern char _shared_memory[];
 extern char _stack_bottom[];
@@ -103,7 +102,7 @@ void kernel_main(void)
 
 	//uart2_init();
 	uart2_init(115200, 19200000, 0);
-	//uart2_puts("uart2 hello\n");
+	uart2_puts("uart2 hello\n");
 
 	gpio_pinmux_set(14, mux_gpio);
 	gpio_direction_output(14, 1);
