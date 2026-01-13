@@ -1,5 +1,7 @@
 #include <type.h>
 #include <uart_geni.h>
+#include <gcc_sc7280.h>
+#include <asm/gpio.h>
 
 /*
  * QUPv3 GENI UART2 baremetal helper (reuse Linux init).
@@ -360,6 +362,11 @@ void uart2_debug_dump_and_try_tx(volatile u64 *shm, u32 shm_base_idx, const char
 
 void uart2_init(void)
 {
+	gpio_pinmux_set(10, mux_qup02);
+	gpio_pinmux_set(11, mux_qup02);
+
+	gcc_enable_uart2_clocks();
+
 	uart2_cancel_abort();
 	uart2_force_cfg_trigger();
 	uart2_clear_m_irqs();

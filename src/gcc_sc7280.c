@@ -30,9 +30,9 @@ int gcc_enable_clock_by_desc(const struct gcc_clk_desc *c)
  * 你需要用 Linux /dev/mem 把这些 CBCR offset 对上。
  */
 static const struct gcc_clk_desc uart2_clks[] = {
-	{ "GCC_QUPV3_WRAP_0_M_AHB_CLK", 0xFFFFFFFF, BIT(0) },
-	{ "GCC_QUPV3_WRAP_0_S_AHB_CLK", 0xFFFFFFFF, BIT(0) },
-	{ "GCC_QUPV3_WRAP0_S2_CLK",     0xFFFFFFFF, BIT(0) },
+//	{ "GCC_QUPV3_WRAP_0_M_AHB_CLK", 0xFFFFFFFF, BIT(0) },
+//	{ "GCC_QUPV3_WRAP_0_S_AHB_CLK", 0xFFFFFFFF, BIT(0) },
+	{ "GCC_QUPV3_WRAP0_S2_CLK",     0x52008, BIT(12) },
 };
 
 int gcc_enable_uart2_clocks(void)
