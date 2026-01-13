@@ -1,8 +1,8 @@
 #include <type.h>
 #include <io.h>
 #include <uart_geni.h>
+#include <gcc_sc7280.h>
 #include <asm/gpio.h>
-#include <gcc_uart2_clk.h>
 
 /* fallback */
 #ifndef UART_TX_FIFO_DEPTH_WORDS_DEFAULT
@@ -271,36 +271,6 @@ static void uart2_scan_all(void)
 	}
 }
 
-#ifndef QUP_SE_VERSION_2_5
-#define QUP_SE_VERSION_2_5 0x2500
-#endif
-
-static int uart2_set_baud_linux_style(u32 baud)
-{
-	u32 sampling = UART_OVERSAMPLING_DEFAULT; /* 32 */
-	u32 ver = qup_wrap0_hw_version();
-	if (ver >= QUP_SE_VERSION_2_5)
-		sampling >>= 1; /* 16 */
-
-	u32 req = baud * sampling;
-
-	u32 clk_idx = 0, clk_rate = 0;
-	if (gcc_uart2_se_clk_config_for_req(req, &clk_idx, &clk_rate) != 0)
-		return -1;
-
-	u32 clk_div = (clk_rate + req - 1U) / req;
-	if (!clk_div) clk_div = 1;
-
-	u32 ser_clk_cfg = SER_CLK_EN | (clk_div << CLK_DIV_SHFT);
-
-	w32(GENI_SER_M_CLK_CFG, ser_clk_cfg);
-	w32(GENI_SER_S_CLK_CFG, ser_clk_cfg);
-	w32(SE_GENI_CLK_SEL, clk_idx & CLK_SEL_MSK);
-	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
-
-	return 0;
-}
-
 int uart2_init(unsigned int baud, unsigned long src_clk_hz, unsigned int clk_sel)
 {
 	(void)baud; (void)src_clk_hz; (void)clk_sel;
@@ -308,7 +278,7 @@ int uart2_init(unsigned int baud, unsigned long src_clk_hz, unsigned int clk_sel
 	gpio_pinmux_set(10, mux_qup02);
 	gpio_pinmux_set(11, mux_qup02);
 
-	uart2_set_baud_linux_style(115200);
+	gcc_enable_uart2_clocks();
 
 	uart2_cancel_abort();
 	uart2_force_cfg_trigger();
