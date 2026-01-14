@@ -398,15 +398,44 @@ static void uart2_force_cfg_trigger(void)
  * Try to unwind stuck command engine.
  * This is safe to call even if engine is idle.
  */
+//static void uart2_cancel_abort(void)
+//{
+//	/* Cancel/abort main + secondary */
+//	w32(SE_GENI_M_CMD_CTRL_REG, M_GENI_CMD_CANCEL);
+//	w32(SE_GENI_M_CMD_CTRL_REG, M_GENI_CMD_ABORT);
+//	w32(SE_GENI_S_CMD_CTRL_REG, S_GENI_CMD_CANCEL);
+//	w32(SE_GENI_S_CMD_CTRL_REG, S_GENI_CMD_ABORT);
+//
+//	/* Trigger cfg after abort */
+//	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
+//}
+
 static void uart2_cancel_abort(void)
 {
-	/* Cancel/abort main + secondary */
-	w32(SE_GENI_M_CMD_CTRL_REG, M_GENI_CMD_CANCEL);
-	w32(SE_GENI_M_CMD_CTRL_REG, M_GENI_CMD_ABORT);
-	w32(SE_GENI_S_CMD_CTRL_REG, S_GENI_CMD_CANCEL);
-	w32(SE_GENI_S_CMD_CTRL_REG, S_GENI_CMD_ABORT);
+	/*
+	 * IMPORTANT:
+	 * Do NOT write SE_GENI_{M,S}_CMD_CTRL_REG here.
+	 * We previously observed that writing wrong bits can leave MCC at 0x28000000
+	 * and break TX state machine (timeouts + garbled output).
+	 *
+	 * Safe recovery sequence:
+	 *  - clear IRQ status
+	 *  - FORCE_DEFAULT pulse
+	 *  - trigger config sequence
+	 */
 
-	/* Trigger cfg after abort */
+	/* clear any pending irqs */
+	w32(SE_GENI_M_IRQ_CLEAR, 0xFFFFFFFF);
+	w32(SE_GENI_S_IRQ_CLEAR, 0xFFFFFFFF);
+
+	/* reset internal state machines */
+	w32(GENI_FORCE_DEFAULT_REG, FORCE_DEFAULT);
+	/* small delay */
+	for (volatile u32 i = 0; i < 1000; i++) __asm__ volatile("nop");
+	w32(GENI_FORCE_DEFAULT_REG, 0);
+	for (volatile u32 i = 0; i < 1000; i++) __asm__ volatile("nop");
+
+	/* apply config */
 	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
 }
 
@@ -424,73 +453,212 @@ int uart2_getc_nonblock(void)
  * "Raw" write with proper START_TX.
  * Returns 0 on "likely sent", <0 on failure/timeout.
  */
+//int uart2_write(const void *buf, u32 len)
+//{
+//	const u8 *p = (const u8 *)buf;
+//	u32 proto = (r32(GENI_FW_REVISION_RO) & FW_REV_PROTOCOL_MSK) >> FW_REV_PROTOCOL_SHFT;
+//
+//	/* If protocol isn't UART, don't try to send (will never work) */
+//	if (proto != GENI_SE_UART)
+//		return -10;
+//
+//	/* Make sure FIFO interface isn't disabled */
+//	if (r32(GENI_IF_DISABLE_RO) & 0x1) /* FIFO_IF_DISABLE */
+//		return -11;
+//
+//	/* Attempt to recover from stuck engine */
+//	//uart2_cancel_abort();
+//	//uart2_force_cfg_trigger();
+//	//uart2_clear_m_irqs();
+//
+//	/* If DMA mode is enabled, turn it off for simple FIFO TX */
+//	// w32(SE_GENI_DMA_MODE_EN, 0);
+//	// w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
+//
+//	/* Program length and kick START_TX */
+////	w32(SE_UART_TX_TRANS_LEN, len);
+//	u32 tx_words = (len + 3) / 4;
+//	w32(SE_UART_TX_TRANS_LEN, tx_words);
+//	w32(SE_GENI_M_CMD0, (UART_START_TX << M_OPCODE_SHFT));
+//
+//	/* Push data with FIFO-depth based flow control */
+//	u32 depth = uart2_tx_fifo_depth_words();
+//	u32 left = len;
+//
+//	for (u32 guard = 0; left && guard < 2000000; guard++) {
+//		u32 wc = r32(SE_GENI_TX_FIFO_STATUS) & TX_FIFO_WC_MASK;
+//
+//		/* Keep at least 1 word headroom */
+//		if (wc >= (depth ? (depth - 1) : UART_TX_FIFO_DEPTH_WORDS_DEFAULT))
+//			continue;
+//
+//		u32 chunk = (left >= 4) ? 4 : left;
+//		w32(SE_GENI_TX_FIFOn, pack4(p, chunk));
+//		p += chunk;
+//		left -= chunk;
+//	}
+//
+//	if (left) {
+//		/* couldn't drain all bytes into FIFO */
+//		return -12;
+//	}
+//
+//	/* Wait for completion: prefer CMD_DONE; also watch ACTIVE */
+//	for (u32 guard = 0; guard < 3000000; guard++) {
+//		u32 irq = r32(SE_GENI_M_IRQ_STATUS);
+//		if (irq & M_CMD_DONE_EN) {
+//			w32(SE_GENI_M_IRQ_CLEAR, irq);
+//			return 0;
+//		}
+//
+//		/* If engine never becomes active, it likely ignored the command */
+//		u32 st = r32(SE_GENI_STATUS);
+//		if (!(st & M_GENI_CMD_ACTIVE)) {
+//			/* Not active and not done -> treat as failure */
+//			/* (Some HW may be very fast; but then CMD_DONE should have latched) */
+//			if (guard > 1000)
+//				return -13;
+//		}
+//	}
+//
+//	return -14; /* timeout */
+//}
+//
+//int uart2_write(const void *buf, u32 len)
+//{
+//	const u8 *p = (const u8 *)buf;
+//	u32 proto = (r32(GENI_FW_REVISION_RO) & FW_REV_PROTOCOL_MSK) >> FW_REV_PROTOCOL_SHFT;
+//
+//	if (proto != GENI_SE_UART)
+//		return -10;
+//
+//	if (r32(GENI_IF_DISABLE_RO) & 0x1) /* FIFO_IF_DISABLE */
+//		return -11;
+//
+//	/* Ensure FIFO mode (DMA off) */
+//	if (r32(SE_GENI_DMA_MODE_EN) != 0) {
+//		w32(SE_GENI_DMA_MODE_EN, 0);
+//		w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
+//	}
+//
+//	/* Clear IRQs before starting a new command (important: MIS may be sticky) */
+//	w32(SE_GENI_M_IRQ_CLEAR, 0xFFFFFFFF);
+//
+//	/*
+//	 * TX length unit must match how we feed FIFO.
+//	 * We push data as 32-bit FIFO words (pack up to 4 bytes per word),
+//	 * so program TX length as number of FIFO words.
+//	 */
+//	u32 tx_words = (len + 3U) / 4U;
+//	w32(SE_UART_TX_TRANS_LEN, tx_words);
+//
+//	/* Kick START_TX */
+//	w32(SE_GENI_M_CMD0, (UART_START_TX << M_OPCODE_SHFT));
+//
+//	/* Push data */
+//	u32 depth = uart2_tx_fifo_depth_words();
+//	u32 left = len;
+//
+//	for (u32 guard = 0; left && guard < 2000000; guard++) {
+//		u32 wc = r32(SE_GENI_TX_FIFO_STATUS) & TX_FIFO_WC_MASK;
+//
+//		/* Keep at least 1 word headroom */
+//		u32 limit = depth ? (depth - 1U) : UART_TX_FIFO_DEPTH_WORDS_DEFAULT;
+//		if (wc >= limit)
+//			continue;
+//
+//		u32 chunk = (left >= 4U) ? 4U : left;
+//		w32(SE_GENI_TX_FIFOn, pack4(p, chunk));
+//		p += chunk;
+//		left -= chunk;
+//	}
+//
+//	if (left)
+//		return -12; /* couldn't push all data */
+//
+//	/*
+//	 * Wait for completion.
+//	 * NOTE: M_CMD_DONE_EN bit position is assumed BIT(0) here (same as Linux).
+//	 * If your hardware has sticky MIS bits, we cleared before start, so BIT(0)
+//	 * should latch for this command.
+//	 */
+//	for (u32 guard = 0; guard < 3000000; guard++) {
+//		u32 irq = r32(SE_GENI_M_IRQ_STATUS);
+//		if (irq & M_CMD_DONE_EN) {
+//			w32(SE_GENI_M_IRQ_CLEAR, irq);
+//			return 0;
+//		}
+//	}
+//
+//	return -14; /* timeout */
+//}
+//
+//
+
 int uart2_write(const void *buf, u32 len)
 {
 	const u8 *p = (const u8 *)buf;
-	u32 proto = (r32(GENI_FW_REVISION_RO) & FW_REV_PROTOCOL_MSK) >> FW_REV_PROTOCOL_SHFT;
+	u32 proto;
 
-	/* If protocol isn't UART, don't try to send (will never work) */
+	if (!buf || len == 0)
+		return 0;
+
+	proto = (r32(GENI_FW_REVISION_RO) & FW_REV_PROTOCOL_MSK) >> FW_REV_PROTOCOL_SHFT;
 	if (proto != GENI_SE_UART)
 		return -10;
 
-	/* Make sure FIFO interface isn't disabled */
-	if (r32(GENI_IF_DISABLE_RO) & 0x1) /* FIFO_IF_DISABLE */
+	if (r32(GENI_IF_DISABLE_RO) & 0x1)
 		return -11;
 
-	/* Attempt to recover from stuck engine */
-	//uart2_cancel_abort();
-	//uart2_force_cfg_trigger();
-	//uart2_clear_m_irqs();
+	/*
+	 * Re-assert clocks/output path before TX.
+	 * Some sequences (FORCE_DEFAULT / init / CGC) can leave TX path gated,
+	 * resulting in "command completes" but garbage/noise on the line.
+	 */
+	w32(SE_GENI_CGC_CTRL, DEFAULT_CGC_EN);
+	w32(GENI_OUTPUT_CTRL, DEFAULT_IO_OUTPUT_CTRL_MSK);
 
-	/* If DMA mode is enabled, turn it off for simple FIFO TX */
-	// w32(SE_GENI_DMA_MODE_EN, 0);
-	// w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
+	/* Ensure FIFO mode (DMA off) */
+	if (r32(SE_GENI_DMA_MODE_EN) != 0) {
+		w32(SE_GENI_DMA_MODE_EN, 0);
+		w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
+	}
 
-	/* Program length and kick START_TX */
+	/* Clear stale pending IRQs */
+	w32(SE_GENI_M_IRQ_CLEAR, 0xFFFFFFFF);
+
+	/* Program length in bytes and kick START_TX */
 	w32(SE_UART_TX_TRANS_LEN, len);
 	w32(SE_GENI_M_CMD0, (UART_START_TX << M_OPCODE_SHFT));
 
-	/* Push data with FIFO-depth based flow control */
+	/* Push bytes */
 	u32 depth = uart2_tx_fifo_depth_words();
 	u32 left = len;
 
-	for (u32 guard = 0; left && guard < 2000000; guard++) {
+	for (u32 guard = 0; left && guard < 8000000; guard++) {
 		u32 wc = r32(SE_GENI_TX_FIFO_STATUS) & TX_FIFO_WC_MASK;
+		u32 limit = depth ? (depth - 1U) : UART_TX_FIFO_DEPTH_WORDS_DEFAULT;
 
-		/* Keep at least 1 word headroom */
-		if (wc >= (depth ? (depth - 1) : UART_TX_FIFO_DEPTH_WORDS_DEFAULT))
+		if (wc >= limit)
 			continue;
 
-		u32 chunk = (left >= 4) ? 4 : left;
-		w32(SE_GENI_TX_FIFOn, pack4(p, chunk));
-		p += chunk;
-		left -= chunk;
+		w32(SE_GENI_TX_FIFOn, (u32)(*p++));
+		left--;
 	}
 
-	if (left) {
-		/* couldn't drain all bytes into FIFO */
+	if (left)
 		return -12;
-	}
 
-	/* Wait for completion: prefer CMD_DONE; also watch ACTIVE */
+	/* Wait CMD_DONE */
 	for (u32 guard = 0; guard < 3000000; guard++) {
 		u32 irq = r32(SE_GENI_M_IRQ_STATUS);
 		if (irq & M_CMD_DONE_EN) {
 			w32(SE_GENI_M_IRQ_CLEAR, irq);
 			return 0;
 		}
-
-		/* If engine never becomes active, it likely ignored the command */
-		u32 st = r32(SE_GENI_STATUS);
-		if (!(st & M_GENI_CMD_ACTIVE)) {
-			/* Not active and not done -> treat as failure */
-			/* (Some HW may be very fast; but then CMD_DONE should have latched) */
-			if (guard > 1000)
-				return -13;
-		}
 	}
 
-	return -14; /* timeout */
+	return -14;
 }
 
 void uart2_putc(char c)
@@ -575,6 +743,12 @@ static void uart2_dump_regs(volatile u64 *shm, u32 *idx)
 	shm_put(shm, idx, "RXWL", SE_UART_RX_WORD_LEN,    r32(SE_UART_RX_WORD_LEN));
 	shm_put(shm, idx, "RXPC", SE_UART_RX_PARITY_CFG,  r32(SE_UART_RX_PARITY_CFG));
 	shm_put(shm, idx, "RXST", SE_UART_RX_STALE_CNT,   r32(SE_UART_RX_STALE_CNT));
+
+	shm_put(shm, idx, "CFG0", SE_GENI_TX_PACKING_CFG0,   r32(SE_GENI_TX_PACKING_CFG0));
+	shm_put(shm, idx, "GRAN", SE_GENI_BYTE_GRAN,   r32(SE_GENI_BYTE_GRAN));
+
+	shm_put(shm, idx, "CGC ", SE_GENI_CGC_CTRL, r32(SE_GENI_CGC_CTRL));
+	shm_put(shm, idx, "IOS ", SE_GENI_IOS,      r32(SE_GENI_IOS));
 }
 
 void uart2_debug_dump_and_try_tx(volatile u64 *shm, u32 shm_base_idx, const char *msg)
@@ -699,7 +873,7 @@ static void geni_se_irq_clear(u32 base)
 void geni_se_init(u32 rx_wm, u32 rx_rfr)
 {
 	u32 val;
-	u32 base = QUPV3_WRAP0_BASE;
+	u32 base = UART2_BASE;
 
 	geni_se_irq_clear(base);
 	geni_se_io_init(base);
@@ -819,11 +993,11 @@ void uart2_init(void)
 
 	gcc_enable_uart2_clocks();
 
-	geni_se_config_packing(QUPV3_WRAP0_BASE, BITS_PER_BYTE, BYTES_PER_FIFO_WORD,
+	geni_se_config_packing(UART2_BASE, BITS_PER_BYTE, BYTES_PER_FIFO_WORD,
 			       false, true, true);
 	geni_se_init(UART_RX_WM, DEF_FIFO_DEPTH_WORDS - 2);
 	shm[21] = 0xaaaaaa;
-	geni_se_select_fifo_mode(QUPV3_WRAP0_BASE);
+	geni_se_select_fifo_mode(UART2_BASE);
 	shm[22] = 0xbbbbbb;
 
 	uart2_cancel_abort();
@@ -833,8 +1007,8 @@ void uart2_init(void)
 	w32(SE_GENI_DMA_MODE_EN, 0);
 	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
 
-	w32(SE_GENI_S_IRQ_EN, 0);
-	w32(SE_GENI_M_IRQ_EN, 0);
+	//w32(SE_GENI_S_IRQ_EN, 0);
+	//w32(SE_GENI_M_IRQ_EN, 0);
 
 	uart2_set_8n1_no_fc();
 
