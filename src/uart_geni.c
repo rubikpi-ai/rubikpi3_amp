@@ -35,6 +35,7 @@ static inline void w32(u64 off, u32 v) { writel(v, (u32)(UART2_BASE + off)); }
 #define TX_FIFO_WC_MASK             0x0FFFFFFF
 
 #define SE_HW_PARAM_0               0xe24
+#define SE_HW_PARAM_1               0xe28
 
 /* UART regs */
 #define SE_UART_TX_TRANS_CFG        0x25c
@@ -246,4 +247,86 @@ int uart2_init(unsigned int baud, unsigned long src_clk_hz, unsigned int clk_sel
 		return -1;
 
 	return 0;
+}
+
+static void shm_put(volatile u64 *shm, u32 *idx, const char *tag, u32 off, u32 val)
+{
+	u32 t = 0;
+	for (int i = 0; i < 4; i++) {
+		char c = tag[i] ? tag[i] : ' ';
+		t |= ((u32)(u8)c) << (8 * i);
+	}
+	shm[(*idx)++] = ((u64)t << 32) | (u64)off;
+	shm[(*idx)++] = (u64)val;
+}
+
+static void uart2_dump_regs(volatile u64 *shm, u32 *idx)
+{
+	shm_put(shm, idx, "FW  ", GENI_FW_REVISION_RO,    r32(GENI_FW_REVISION_RO));
+	shm_put(shm, idx, "IFD ", GENI_IF_DISABLE_RO,     r32(GENI_IF_DISABLE_RO));
+	shm_put(shm, idx, "OUT ", GENI_OUTPUT_CTRL,       r32(GENI_OUTPUT_CTRL));
+	shm_put(shm, idx, "CFG ", SE_GENI_CFG_SEQ_START,  r32(SE_GENI_CFG_SEQ_START));
+	shm_put(shm, idx, "STA ", SE_GENI_STATUS,         r32(SE_GENI_STATUS));
+	shm_put(shm, idx, "CLKM", GENI_SER_M_CLK_CFG,     r32(GENI_SER_M_CLK_CFG));
+	shm_put(shm, idx, "CLKS", GENI_SER_S_CLK_CFG,     r32(GENI_SER_S_CLK_CFG));
+	shm_put(shm, idx, "SEL ", SE_GENI_CLK_SEL,        r32(SE_GENI_CLK_SEL));
+	shm_put(shm, idx, "DMA ", SE_GENI_DMA_MODE_EN,    r32(SE_GENI_DMA_MODE_EN));
+
+	shm_put(shm, idx, "TXFS", SE_GENI_TX_FIFO_STATUS, r32(SE_GENI_TX_FIFO_STATUS));
+	shm_put(shm, idx, "RXFS", SE_GENI_RX_FIFO_STATUS, r32(SE_GENI_RX_FIFO_STATUS));
+
+	shm_put(shm, idx, "MC0 ", SE_GENI_M_CMD0,         r32(SE_GENI_M_CMD0));
+	shm_put(shm, idx, "MCC ", SE_GENI_M_CMD_CTRL_REG, r32(SE_GENI_M_CMD_CTRL_REG));
+	shm_put(shm, idx, "MEN ", SE_GENI_M_IRQ_EN,       r32(SE_GENI_M_IRQ_EN));
+	shm_put(shm, idx, "MIS ", SE_GENI_M_IRQ_STATUS,   r32(SE_GENI_M_IRQ_STATUS));
+
+	shm_put(shm, idx, "SC0 ", SE_GENI_S_CMD0,         r32(SE_GENI_S_CMD0));
+	shm_put(shm, idx, "SCC ", SE_GENI_S_CMD_CTRL_REG, r32(SE_GENI_S_CMD_CTRL_REG));
+	shm_put(shm, idx, "SEN ", SE_GENI_S_IRQ_EN,       r32(SE_GENI_S_IRQ_EN));
+	shm_put(shm, idx, "SIS ", SE_GENI_S_IRQ_STATUS,   r32(SE_GENI_S_IRQ_STATUS));
+
+	shm_put(shm, idx, "HP0 ", SE_HW_PARAM_0,          r32(SE_HW_PARAM_0));
+	shm_put(shm, idx, "HP1 ", SE_HW_PARAM_1,          r32(SE_HW_PARAM_1));
+
+	shm_put(shm, idx, "TXCF", SE_UART_TX_TRANS_CFG,   r32(SE_UART_TX_TRANS_CFG));
+	shm_put(shm, idx, "TXWL", SE_UART_TX_WORD_LEN,    r32(SE_UART_TX_WORD_LEN));
+	shm_put(shm, idx, "TXSB", SE_UART_TX_STOP_BIT_LEN,r32(SE_UART_TX_STOP_BIT_LEN));
+	shm_put(shm, idx, "TXPC", SE_UART_TX_PARITY_CFG,  r32(SE_UART_TX_PARITY_CFG));
+	shm_put(shm, idx, "TXLN", SE_UART_TX_TRANS_LEN,   r32(SE_UART_TX_TRANS_LEN));
+
+	shm_put(shm, idx, "RXCF", SE_UART_RX_TRANS_CFG,   r32(SE_UART_RX_TRANS_CFG));
+	shm_put(shm, idx, "RXWL", SE_UART_RX_WORD_LEN,    r32(SE_UART_RX_WORD_LEN));
+	shm_put(shm, idx, "RXPC", SE_UART_RX_PARITY_CFG,  r32(SE_UART_RX_PARITY_CFG));
+	shm_put(shm, idx, "RXST", SE_UART_RX_STALE_CNT,   r32(SE_UART_RX_STALE_CNT));
+}
+
+void uart2_debug_dump_and_try_tx(volatile u64 *shm, u32 shm_base_idx, const char *msg)
+{
+	u32 idx = shm_base_idx;
+
+	shm[idx++] = 0x554152543247454EULL; /* "UART2GEN" */
+	shm[idx++] = UART2_BASE;
+
+	shm[idx++] = 0x4245464F52450001ULL; /* BEFORE */
+	uart2_dump_regs(shm, &idx);
+
+	/* Apply recovery + cfg trigger before TX */
+	//uart2_cancel_abort();
+//	uart2_force_cfg_trigger();
+
+	shm[idx++] = 0x5052455000000000ULL; /* "PREP" */
+	uart2_dump_regs(shm, &idx);
+
+	/* Try transmit */
+	u32 len = 0;
+	while (msg[len] && len < 256) len++;
+	int rc = uart2_write(msg, len);
+
+	shm[idx++] = 0x5243000000000000ULL | (u32)(rc & 0xFFFF); /* "RC" */
+	shm[idx++] = (u64)(u32)rc;
+
+	shm[idx++] = 0x4146544552000002ULL; /* AFTER */
+	uart2_dump_regs(shm, &idx);
+
+	shm[idx++] = 0x454e440000000000ULL; /* END */
 }
