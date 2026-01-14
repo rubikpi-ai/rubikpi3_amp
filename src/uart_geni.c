@@ -74,6 +74,19 @@ static inline void w32(u64 off, u32 v) { writel(v, (u32)(UART2_BASE + off)); }
 #define UART_RX_PAR_EN              (1U << 3)
 #define TX_STOP_BIT_LEN_1           0
 
+/* Packing + WM regs (from linux geni-se.h, common for QUPv3) */
+#define SE_GENI_TX_PACKING_CFG0     0x260
+#define SE_GENI_TX_PACKING_CFG1     0x264
+#define SE_GENI_RX_PACKING_CFG0     0x284
+#define SE_GENI_RX_PACKING_CFG1     0x288
+
+#define SE_GENI_TX_WATERMARK_REG    0x80c
+#define SE_GENI_RX_WATERMARK_REG    0x810
+
+/* Common packing fields: we want 8-bit, 4 bytes per word packing */
+#define PACK_EN                     (1U << 0)
+#define BYTE_SWAP                   (1U << 2)
+
 /* ---------- delay/poll ---------- */
 static void udelay_local(u32 us)
 {
@@ -224,6 +237,54 @@ int uart2_write(const void *buf, u32 len)
 	return uart2_tx_bytes((const u8*)buf, len);
 }
 
+static void uart2_geni_full_reset(void)
+{
+	/* Disable IRQs (avoid stale) */
+	w32(SE_GENI_M_IRQ_CLEAR, 0xFFFFFFFF);
+	w32(SE_GENI_S_IRQ_CLEAR, 0xFFFFFFFF);
+
+	/* Cancel/abort both engines */
+	w32(SE_GENI_M_CMD_CTRL_REG, M_GENI_CMD_CANCEL);
+	udelay_local(10);
+	w32(SE_GENI_M_CMD_CTRL_REG, M_GENI_CMD_ABORT);
+	udelay_local(10);
+
+	w32(SE_GENI_S_CMD_CTRL_REG, S_GENI_CMD_CANCEL);
+	udelay_local(10);
+	w32(SE_GENI_S_CMD_CTRL_REG, S_GENI_CMD_ABORT);
+	udelay_local(10);
+
+	/* Force default resets internal state machines */
+	w32(GENI_FORCE_DEFAULT_REG, FORCE_DEFAULT);
+	udelay_local(10);
+	w32(GENI_FORCE_DEFAULT_REG, 0);
+	udelay_local(10);
+
+	/* Trigger cfg seq */
+	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
+	udelay_local(10);
+}
+
+static void uart2_geni_packing_init(void)
+{
+	/*
+	 * Goal like Linux:
+	 * geni_se_config_packing(&se, 8bits, 4bytes/word, false, true, true)
+	 *
+	 * We set TX/RX packing to pack 4x8-bit into 32-bit FIFO word.
+	 * Exact bitfields are HW-specific; below is a conservative common setup:
+	 */
+	w32(SE_GENI_TX_PACKING_CFG0, PACK_EN);
+	w32(SE_GENI_TX_PACKING_CFG1, 0);
+
+	w32(SE_GENI_RX_PACKING_CFG0, PACK_EN);
+	w32(SE_GENI_RX_PACKING_CFG1, 0);
+
+	/* Watermarks: keep low to simplify */
+	w32(SE_GENI_TX_WATERMARK_REG, 1);
+	w32(SE_GENI_RX_WATERMARK_REG, 1);
+}
+
 int uart2_init(unsigned int baud, unsigned long src_clk_hz, unsigned int clk_sel)
 {
 	(void)src_clk_hz;
@@ -232,14 +293,11 @@ int uart2_init(unsigned int baud, unsigned long src_clk_hz, unsigned int clk_sel
 	gpio_pinmux_set(10, mux_qup02);
 	gpio_pinmux_set(11, mux_qup02);
 
-	/* 1) 必须先开 branch gate（否则完全无输出） */
 	gcc_enable_uart2_clocks();
 
-	/* 2) 恢复 SE 状态 */
-	uart2_cancel_abort();
-	uart2_force_cfg_trigger();
+	uart2_geni_full_reset();
+	uart2_geni_packing_init();
 
-	/* 3) 配 8N1 */
 	uart2_set_8n1_no_fc();
 
 	/* 4) 最后设波特率（会调用 RCG2 set_rate + enable branch + GENI divider/clk_sel） */
