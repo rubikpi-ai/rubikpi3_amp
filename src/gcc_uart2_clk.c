@@ -58,3 +58,11 @@ int gcc_uart2_se_clk_config_for_req(u32 req_hz, u32 *idx_out, u32 *src_hz_out)
 {
 	return bm_clk_config_for_req(&uart2_se_clk, req_hz, idx_out, src_hz_out);
 }
+int gcc_uart2_se_clk_set_rate_idx(u32 idx)
+{
+	/* 直接复用 bm_clk_set_rate_idx(&uart2_se_clk, idx); 然后 enable */
+	int ret = bm_clk_set_rate_idx(&uart2_se_clk, idx);
+	if (ret) return ret;
+	bm_clk_enable(&uart2_se_clk);
+	return 0;
+}

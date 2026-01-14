@@ -21,7 +21,7 @@ static inline void w32(u64 off, u32 v) { writel(v, (u32)(UART2_BASE + off)); }
 #define GENI_SER_S_CLK_CFG          0x4c
 #define GENI_IF_DISABLE_RO          0x64
 #define GENI_FW_REVISION_RO         0x68
-#define SE_GENI_CLK_SEL             0x7c
+#define SE_GENI_CLK_SEL             0x80
 #define SE_GENI_CFG_SEQ_START       0x84
 #define SE_GENI_DMA_MODE_EN         0x258
 
@@ -124,9 +124,27 @@ static void uart2_force_cfg_trigger(void)
 
 static void uart2_cancel_abort(void)
 {
-	w32(SE_GENI_M_CMD_CTRL_REG, M_GENI_CMD_CANCEL);
-	w32(SE_GENI_M_CMD_CTRL_REG, M_GENI_CMD_ABORT);
+	/*
+	 * IMPORTANT:
+	 * Current MCC/SCC bit definitions are not confirmed. Writing wrong bits
+	 * leaves MCC at 0x28000000 (observed) and breaks TX state machine.
+	 *
+	 * Until SE_GENI_*_CMD_CTRL_REG bitfields are verified, avoid writing them.
+	 */
+
+	/* Clear IRQ status (safe) */
+	w32(SE_GENI_M_IRQ_CLEAR, 0xFFFFFFFF);
+	w32(SE_GENI_S_IRQ_CLEAR, 0xFFFFFFFF);
+
+	/* Force default resets internal state machines (safe) */
+	w32(GENI_FORCE_DEFAULT_REG, FORCE_DEFAULT);
+	udelay_local(10);
+	w32(GENI_FORCE_DEFAULT_REG, 0);
+	udelay_local(10);
+
+	/* Trigger cfg seq */
 	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
+	udelay_local(10);
 }
 
 static int uart2_check_uart_proto(void)
@@ -156,26 +174,58 @@ static void uart2_set_8n1_no_fc(void)
 #define QUP_SE_VERSION_2_5 0x2500
 #endif
 
+//static int uart2_set_baud_linux_style(u32 baud)
+//{
+//	u32 sampling = UART_OVERSAMPLING_DEFAULT; /* 32 */
+//	u32 ver = qup_wrap0_hw_version();
+//	if (ver >= QUP_SE_VERSION_2_5)
+//		sampling >>= 1; /* 16 */
+//
+//	u32 req = baud * sampling;
+//
+//	u32 clk_idx = 0, clk_rate = 0;
+//	if (gcc_uart2_se_clk_config_for_req(req, &clk_idx, &clk_rate) != 0)
+//		return -1;
+//
+//	u32 clk_div = (clk_rate + req - 1U) / req;
+//	if (!clk_div) clk_div = 1;
+//
+//	u32 ser_clk_cfg = SER_CLK_EN | (clk_div << CLK_DIV_SHFT);
+//
+//	w32(GENI_SER_M_CLK_CFG, ser_clk_cfg);
+//	w32(GENI_SER_S_CLK_CFG, ser_clk_cfg);
+//	w32(SE_GENI_CLK_SEL, clk_idx & CLK_SEL_MSK);
+//	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
+//
+//	return 0;
+//}
+//
+int gcc_uart2_se_clk_set_rate_idx(u32 idx);
 static int uart2_set_baud_linux_style(u32 baud)
 {
-	u32 sampling = UART_OVERSAMPLING_DEFAULT; /* 32 */
-	u32 ver = qup_wrap0_hw_version();
-	if (ver >= QUP_SE_VERSION_2_5)
-		sampling >>= 1; /* 16 */
-
+	/* force sampling=32 for now to match 7.3728 -> /2 exact */
+	u32 sampling = 32;
 	u32 req = baud * sampling;
 
-	u32 clk_idx = 0, clk_rate = 0;
-	if (gcc_uart2_se_clk_config_for_req(req, &clk_idx, &clk_rate) != 0)
-		return -1;
+	/* Force GCC clock to 7.3728MHz entry (idx=0 in your ftbl) */
+	/* 你需要在 gcc_uart2_clk.c 里暴露一个 set_rate_idx(0) 的函数，
+	   如果目前没有，就先临时在 uart_geni.c 里直接写 RCG2（不推荐长期） */
+	extern int gcc_uart2_se_clk_set_rate_idx(u32 idx);
+	gcc_uart2_se_clk_set_rate_idx(0);
 
-	u32 clk_div = (clk_rate + req - 1U) / req;
-	if (!clk_div) clk_div = 1;
+	/* Ensure branch enabled (你现在用 gcc_enable_uart2_clocks 也行，但更推荐在 gcc_uart2 内部做) */
+	gcc_enable_uart2_clocks();
 
-	u32 ser_clk_cfg = SER_CLK_EN | (clk_div << CLK_DIV_SHFT);
+	u32 clk_rate = 7372800;
+	u32 clk_idx = 0;
+
+	u32 clk_div = (clk_rate + req - 1U) / req; /* should be 2 */
+	u32 ser_clk_cfg = SER_CLK_EN | (clk_div << CLK_DIV_SHFT); /* expect 0x21 */
 
 	w32(GENI_SER_M_CLK_CFG, ser_clk_cfg);
 	w32(GENI_SER_S_CLK_CFG, ser_clk_cfg);
+
+	/* IMPORTANT: CLK_SEL now at 0x80 */
 	w32(SE_GENI_CLK_SEL, clk_idx & CLK_SEL_MSK);
 	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
 
@@ -239,50 +289,39 @@ int uart2_write(const void *buf, u32 len)
 
 static void uart2_geni_full_reset(void)
 {
-	/* Disable IRQs (avoid stale) */
+	/* Clear IRQs */
 	w32(SE_GENI_M_IRQ_CLEAR, 0xFFFFFFFF);
 	w32(SE_GENI_S_IRQ_CLEAR, 0xFFFFFFFF);
 
-	/* Cancel/abort both engines */
-	w32(SE_GENI_M_CMD_CTRL_REG, M_GENI_CMD_CANCEL);
-	udelay_local(10);
-	w32(SE_GENI_M_CMD_CTRL_REG, M_GENI_CMD_ABORT);
-	udelay_local(10);
+	/* Do NOT write SE_GENI_{M,S}_CMD_CTRL_REG until bitfields are confirmed */
 
-	w32(SE_GENI_S_CMD_CTRL_REG, S_GENI_CMD_CANCEL);
-	udelay_local(10);
-	w32(SE_GENI_S_CMD_CTRL_REG, S_GENI_CMD_ABORT);
-	udelay_local(10);
-
-	/* Force default resets internal state machines */
+	/* Force default */
 	w32(GENI_FORCE_DEFAULT_REG, FORCE_DEFAULT);
 	udelay_local(10);
 	w32(GENI_FORCE_DEFAULT_REG, 0);
 	udelay_local(10);
 
-	/* Trigger cfg seq */
 	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
 	udelay_local(10);
 }
 
 static void uart2_geni_packing_init(void)
 {
-	/*
-	 * Goal like Linux:
-	 * geni_se_config_packing(&se, 8bits, 4bytes/word, false, true, true)
-	 *
-	 * We set TX/RX packing to pack 4x8-bit into 32-bit FIFO word.
-	 * Exact bitfields are HW-specific; below is a conservative common setup:
-	 */
-	w32(SE_GENI_TX_PACKING_CFG0, PACK_EN);
-	w32(SE_GENI_TX_PACKING_CFG1, 0);
-
-	w32(SE_GENI_RX_PACKING_CFG0, PACK_EN);
-	w32(SE_GENI_RX_PACKING_CFG1, 0);
-
-	/* Watermarks: keep low to simplify */
+	/* Only set watermarks; packing cfg offsets not yet verified */
 	w32(SE_GENI_TX_WATERMARK_REG, 1);
 	w32(SE_GENI_RX_WATERMARK_REG, 1);
+}
+
+
+
+/* Add near top with other macros */
+#define GCC_BASE_LOCAL 0x00100000UL
+#define GCC_S2_ENABLE_REG 0x52008
+#define GCC_S2_CLK_SRC_CMD_RCGR 0x17270
+
+static inline u32 gcc_r32_local(u32 off)
+{
+	return readl((u32)(GCC_BASE_LOCAL + off));
 }
 
 int uart2_init(unsigned int baud, unsigned long src_clk_hz, unsigned int clk_sel)
@@ -317,6 +356,14 @@ static void shm_put(volatile u64 *shm, u32 *idx, const char *tag, u32 off, u32 v
 	shm[(*idx)++] = ((u64)t << 32) | (u64)off;
 	shm[(*idx)++] = (u64)val;
 }
+
+static void uart2_dump_window_0x70_0x90(volatile u64 *shm, u32 *idx)
+{
+	for (u32 off = 0x70; off <= 0x90; off += 4) {
+		shm_put(shm, idx, "W70 ", off, r32(off));
+	}
+}
+
 
 static void uart2_dump_regs(volatile u64 *shm, u32 *idx)
 {
@@ -356,6 +403,27 @@ static void uart2_dump_regs(volatile u64 *shm, u32 *idx)
 	shm_put(shm, idx, "RXWL", SE_UART_RX_WORD_LEN,    r32(SE_UART_RX_WORD_LEN));
 	shm_put(shm, idx, "RXPC", SE_UART_RX_PARITY_CFG,  r32(SE_UART_RX_PARITY_CFG));
 	shm_put(shm, idx, "RXST", SE_UART_RX_STALE_CNT,   r32(SE_UART_RX_STALE_CNT));
+
+		/* ---- GCC side sanity ---- */
+	shm_put(shm, idx, "GEn ", GCC_S2_ENABLE_REG,         gcc_r32_local(GCC_S2_ENABLE_REG));
+	shm_put(shm, idx, "GCc ", GCC_S2_CLK_SRC_CMD_RCGR+0, gcc_r32_local(GCC_S2_CLK_SRC_CMD_RCGR+0));
+	shm_put(shm, idx, "GCf ", GCC_S2_CLK_SRC_CMD_RCGR+4, gcc_r32_local(GCC_S2_CLK_SRC_CMD_RCGR+4));
+	shm_put(shm, idx, "GCm ", GCC_S2_CLK_SRC_CMD_RCGR+8, gcc_r32_local(GCC_S2_CLK_SRC_CMD_RCGR+8));
+	shm_put(shm, idx, "GCn ", GCC_S2_CLK_SRC_CMD_RCGR+12,gcc_r32_local(GCC_S2_CLK_SRC_CMD_RCGR+12));
+	shm_put(shm, idx, "GCd ", GCC_S2_CLK_SRC_CMD_RCGR+16,gcc_r32_local(GCC_S2_CLK_SRC_CMD_RCGR+16));
+
+	uart2_dump_window_0x70_0x90(shm, idx);
+}
+
+static void uart2_probe_clk_sel_offsets(volatile u64 *shm, u32 *idx, u32 clk_idx)
+{
+	static const u32 cand[] = { 0x7c, 0x80, 0x88, 0x8c, 0x90 };
+	for (u32 i = 0; i < sizeof(cand)/sizeof(cand[0]); i++) {
+		u32 off = cand[i];
+		w32(off, clk_idx & 0x7);
+		w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
+		shm_put(shm, idx, "PSL ", off, r32(off));
+	}
 }
 
 void uart2_debug_dump_and_try_tx(volatile u64 *shm, u32 shm_base_idx, const char *msg)
@@ -373,6 +441,7 @@ void uart2_debug_dump_and_try_tx(volatile u64 *shm, u32 shm_base_idx, const char
 //	uart2_force_cfg_trigger();
 
 	shm[idx++] = 0x5052455000000000ULL; /* "PREP" */
+	uart2_probe_clk_sel_offsets(shm, &idx, 3); // 用一个明显的 idx 值
 	uart2_dump_regs(shm, &idx);
 
 	/* Try transmit */
