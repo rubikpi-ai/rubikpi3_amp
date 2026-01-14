@@ -113,7 +113,7 @@ void kernel_main(void)
 	gpio_pinmux_set(44, mux_gpio);
 	gpio_direction_output(44, 0);
 
-	uart2_debug_dump_and_try_tx(shm, 200, "BM:TEST1234\n");
+	uart2_debug_dump_and_try_tx(shm, 200, "0123456789ABCDEF");
 	//uart2_puts("hello world\n");
 
 	gicv3_init_for_cpu();

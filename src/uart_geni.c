@@ -25,7 +25,7 @@
 static inline u32 r32(u64 off) { return *(volatile u32 *)(UART2_BASE + off); }
 static inline void w32(u64 off, u32 v) { *(volatile u32 *)(UART2_BASE + off) = v; }
 
-static writel_relaxed(u32 val, u64 addr)
+static inline void writel_relaxed(u32 val, u64 addr)
 {
 	*(volatile u32 *)addr = val;
 }
@@ -349,11 +349,20 @@ static u32 readl_relaxed(u64 addr)
 
 
 /* ---------------- small utils ---------------- */
+//static inline u32 pack4(const u8 *p, u32 n)
+//{
+//	u32 w = 0;
+//	for (u32 i = 0; i < n; i++)
+//		w |= ((u32)p[i]) << (8U * i);
+//	return w;
+//}
+
 static inline u32 pack4(const u8 *p, u32 n)
 {
 	u32 w = 0;
+	/* pack into MSB-first lanes: p[0] -> bits[31:24], p[1] -> [23:16] ... */
 	for (u32 i = 0; i < n; i++)
-		w |= ((u32)p[i]) << (8U * i);
+		w |= ((u32)p[i]) << (8U * (3U - i));
 	return w;
 }
 
@@ -610,14 +619,6 @@ int uart2_write(const void *buf, u32 len)
 	if (r32(GENI_IF_DISABLE_RO) & 0x1)
 		return -11;
 
-	/*
-	 * Re-assert clocks/output path before TX.
-	 * Some sequences (FORCE_DEFAULT / init / CGC) can leave TX path gated,
-	 * resulting in "command completes" but garbage/noise on the line.
-	 */
-	w32(SE_GENI_CGC_CTRL, DEFAULT_CGC_EN);
-	w32(GENI_OUTPUT_CTRL, DEFAULT_IO_OUTPUT_CTRL_MSK);
-
 	/* Ensure FIFO mode (DMA off) */
 	if (r32(SE_GENI_DMA_MODE_EN) != 0) {
 		w32(SE_GENI_DMA_MODE_EN, 0);
@@ -627,23 +628,30 @@ int uart2_write(const void *buf, u32 len)
 	/* Clear stale pending IRQs */
 	w32(SE_GENI_M_IRQ_CLEAR, 0xFFFFFFFF);
 
-	/* Program length in bytes and kick START_TX */
-	w32(SE_UART_TX_TRANS_LEN, len);
+	/*
+	 * With packing configured as 4x8 (pack_words=4, bpw=8),
+	 * TX length must be in FIFO words, and we should feed 32-bit words.
+	 */
+	u32 tx_words = (len + 3U) / 4U;
+	w32(SE_UART_TX_TRANS_LEN, tx_words);
+
+	/* Start TX */
 	w32(SE_GENI_M_CMD0, (UART_START_TX << M_OPCODE_SHFT));
 
-	/* Push bytes */
 	u32 depth = uart2_tx_fifo_depth_words();
 	u32 left = len;
 
-	for (u32 guard = 0; left && guard < 8000000; guard++) {
+	for (u32 guard = 0; left && guard < 4000000; guard++) {
 		u32 wc = r32(SE_GENI_TX_FIFO_STATUS) & TX_FIFO_WC_MASK;
 		u32 limit = depth ? (depth - 1U) : UART_TX_FIFO_DEPTH_WORDS_DEFAULT;
 
 		if (wc >= limit)
 			continue;
 
-		w32(SE_GENI_TX_FIFOn, (u32)(*p++));
-		left--;
+		u32 chunk = (left >= 4U) ? 4U : left;
+		w32(SE_GENI_TX_FIFOn, pack4(p, chunk));
+		p += chunk;
+		left -= chunk;
 	}
 
 	if (left)
@@ -749,6 +757,8 @@ static void uart2_dump_regs(volatile u64 *shm, u32 *idx)
 
 	shm_put(shm, idx, "CGC ", SE_GENI_CGC_CTRL, r32(SE_GENI_CGC_CTRL));
 	shm_put(shm, idx, "IOS ", SE_GENI_IOS,      r32(SE_GENI_IOS));
+
+	shm_put(shm, idx, "QVER", QUPV3_HW_VER_REG, readl_relaxed(QUPV3_WRAP0_BASE + QUPV3_HW_VER_REG));
 }
 
 void uart2_debug_dump_and_try_tx(volatile u64 *shm, u32 shm_base_idx, const char *msg)
@@ -785,19 +795,37 @@ void uart2_debug_dump_and_try_tx(volatile u64 *shm, u32 shm_base_idx, const char
 
 #define STALE_TIMEOUT			16
 #define DEFAULT_BITS_PER_CHAR		10
+//static void uart2_set_8n1_no_fc(void)
+//{
+//	u32 txcfg = UART_CTS_MASK;
+//	txcfg &= ~UART_TX_PAR_EN;
+//
+//	w32(SE_UART_TX_TRANS_CFG, txcfg);
+//	w32(SE_UART_TX_PARITY_CFG, 0);
+//	w32(SE_UART_RX_TRANS_CFG, 0 & ~UART_RX_PAR_EN);
+//	w32(SE_UART_RX_PARITY_CFG, 0);
+//
+//	w32(SE_UART_TX_WORD_LEN, 8);
+//	w32(SE_UART_RX_WORD_LEN, 8);
+//	w32(SE_UART_TX_STOP_BIT_LEN, TX_STOP_BIT_LEN_1);
+//	w32(SE_UART_RX_STALE_CNT, DEFAULT_BITS_PER_CHAR * STALE_TIMEOUT);
+//}
+
 static void uart2_set_8n1_no_fc(void)
 {
-	u32 txcfg = UART_CTS_MASK;
-	txcfg &= ~UART_TX_PAR_EN;
-
-	w32(SE_UART_TX_TRANS_CFG, txcfg);
+	/* Truly disable flow-control: do NOT set UART_CTS_MASK */
+	w32(SE_UART_TX_TRANS_CFG, 0);        /* no parity, no CTS */
 	w32(SE_UART_TX_PARITY_CFG, 0);
-	w32(SE_UART_RX_TRANS_CFG, 0 & ~UART_RX_PAR_EN);
+
+	w32(SE_UART_RX_TRANS_CFG, 0);        /* no parity */
 	w32(SE_UART_RX_PARITY_CFG, 0);
 
 	w32(SE_UART_TX_WORD_LEN, 8);
 	w32(SE_UART_RX_WORD_LEN, 8);
+
 	w32(SE_UART_TX_STOP_BIT_LEN, TX_STOP_BIT_LEN_1);
+
+	/* stale timeout: keep as before */
 	w32(SE_UART_RX_STALE_CNT, DEFAULT_BITS_PER_CHAR * STALE_TIMEOUT);
 }
 
@@ -994,11 +1022,9 @@ void uart2_init(void)
 	gcc_enable_uart2_clocks();
 
 	geni_se_config_packing(UART2_BASE, BITS_PER_BYTE, BYTES_PER_FIFO_WORD,
-			       false, true, true);
+			       true, true, true);
 	geni_se_init(UART_RX_WM, DEF_FIFO_DEPTH_WORDS - 2);
-	shm[21] = 0xaaaaaa;
 	geni_se_select_fifo_mode(UART2_BASE);
-	shm[22] = 0xbbbbbb;
 
 	uart2_cancel_abort();
 	uart2_force_cfg_trigger();
@@ -1032,5 +1058,16 @@ void uart2_init(void)
 	w32(SE_GENI_TX_WATERMARK_REG, 2);
 	w32(SE_GENI_M_IRQ_CLEAR, M_CMD_DONE_EN);
 
-	uart2_set_baud_linux_style(115200);
+//	uart2_set_baud_linux_style(115200);
+	/* Force-disable HW flow control (CTS). Some earlier code may re-enable it. */
+w32(SE_UART_TX_TRANS_CFG, 0);
+w32(SE_UART_RX_TRANS_CFG, 0);
+
+/* optional: ensure parity cfg still 0 */
+w32(SE_UART_TX_PARITY_CFG, 0);
+w32(SE_UART_RX_PARITY_CFG, 0);
+
+/* Read back (for debug) */
+shm[23] = 0x5458434600000000ULL; /* "TXCF" tag */
+shm[24] = (u64)r32(SE_UART_TX_TRANS_CFG);
 }
