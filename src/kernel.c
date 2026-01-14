@@ -87,8 +87,10 @@ static inline void psci_cpu_off(void)
 #define AMP_CMD_IDX  32
 #define AMP_CMD_RESET 0x52534554ULL /* 'RSET' */
 
-int uart2_init(unsigned int baud, unsigned long src_clk_hz, unsigned int clk_sel);
+//int uart2_init(unsigned int baud, unsigned long src_clk_hz, unsigned int clk_sel);
+int uart2_init(void);
 void uart2_debug_dump_and_try_tx(volatile u64 *shm, u32 shm_base_idx, const char *msg);
+
 void kernel_main(void)
 {
 	volatile u64 *shm = (volatile u64 *)0xD7C00000;
@@ -102,8 +104,8 @@ void kernel_main(void)
 
 	paging_init();
 
-	//uart2_init();
-	uart2_init(115200, 19200000, 0);
+	uart2_init();
+//	uart2_init(115200, 19200000, 0);
 //	uart2_puts("uart2 hello\n");
 
 	gpio_pinmux_set(14, mux_gpio);
@@ -111,7 +113,7 @@ void kernel_main(void)
 	gpio_pinmux_set(44, mux_gpio);
 	gpio_direction_output(44, 0);
 
-	uart2_debug_dump_and_try_tx(shm, 200, "BM: uart2 test 123\n");
+	uart2_debug_dump_and_try_tx(shm, 200, "BM:TEST1234\n");
 	//uart2_puts("hello world\n");
 
 	gicv3_init_for_cpu();

@@ -3,6 +3,7 @@
 
 #include <errorno.h>
 
+
 #define SZ_1K	0x00000400
 #define SZ_4K	0x00001000
 #define SZ_1M	0x00100000
@@ -21,6 +22,7 @@
 #define NULL ((void *)0)
 
 #ifdef __ASSEMBLER__
+#define BITS_PER_LONG 64
 #define _AC(X,Y)	X
 #define _AT(T,X)	X
 #else
@@ -41,15 +43,17 @@
 
 #define GENMASK_ULL(h, l) \
 	(((~0ULL) - (1ULL << (l)) + 1) & \
-	 (~0ULL >> (BITS_PER_LONG_LONG - 1 - (h))))
+	 (~0ULL >> (BITS_PER_LONG - 1 - (h))))
 
 #ifndef __ASSEMBLY__
+#define BITS_PER_LONG 64
 #define BIT_ULL(nr)	(1ULL << (nr))
 #define BIT_MASK(nr)	(1UL << ((nr) % BITS_PER_LONG))
 #define BIT_WORD(nr)	((nr) / BITS_PER_LONG)
 
 #define __ALIGN_MASK(x, mask)	(((x) + (mask)) & ~(mask))
 #define ALIGN(x, a) __ALIGN_MASK(x, (typeof(x))(a) - 1)
+
 
 #ifndef __ASSEMBLER__
 typedef char s8;
