@@ -18,9 +18,9 @@
 #define RCG2_CFG_SRC_DIV_MSK   (0x1FU << RCG2_CFG_SRC_DIV_SHFT)
 
 /* Toggle if needed */
-#ifndef BM_RCG2_D_INVERT
-#define BM_RCG2_D_INVERT 1
-#endif
+//#ifndef BM_RCG2_D_INVERT
+//#define BM_RCG2_D_INVERT 1
+//#endif
 
 static inline u32 gcc_r32(u32 off) { return readl((u32)(GCC_BASE + off)); }
 static inline void gcc_w32(u32 off, u32 v) { writel(v, (u32)(GCC_BASE + off)); }
@@ -111,10 +111,8 @@ int bm_clk_freq_match(const struct bm_clk_rcg2_branch *c,
 		if (!src) continue;
 
 		u32 div = div_round_up_u32(src, req_hz);
-		if (!div) div = 1;
 
-		u32 achieved = src / div;
-		u32 delta = (req_hz > achieved) ? (req_hz - achieved) : 0;
+		u32 delta = req_hz - src / div;
 
 		if (delta < best_delta) {
 			best_delta = delta;

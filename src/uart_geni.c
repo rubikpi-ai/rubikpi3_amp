@@ -138,7 +138,7 @@ static u32 readl_relaxed(u64 addr)
 #define CLK_DIV_MSK                 (0xFFFU << CLK_DIV_SHFT)  /* conservative; Linux uses div field */
 #define CLK_SEL_MSK                 0x7
 
-#define QUP_SE_VERSION_2_5 0x2500
+#define QUP_SE_VERSION_2_5 0x20050000
 
 #define DEF_FIFO_DEPTH_WORDS		16
 #define UART_RX_WM			2
@@ -704,6 +704,8 @@ void uart2_debug_dump_and_try_tx(volatile u64 *shm, u32 shm_base_idx, const char
 	uart2_dump_regs(shm, &idx);
 
 	shm[idx++] = 0x454e440000000000ULL; /* END */
+
+	uart2_dump_baud_regs(shm, &idx);
 }
 
 
@@ -968,19 +970,41 @@ void uart2_init(void)
 	w32(SE_UART_RX_WORD_LEN, bits_per_char);
 	w32(SE_UART_TX_STOP_BIT_LEN, stop_bit_len);
 
-	w32(SE_GENI_TX_WATERMARK_REG, 2);
 	w32(SE_GENI_M_IRQ_CLEAR, M_CMD_DONE_EN);
 
-	uart2_set_baud_linux_style(115200);
-	/* Force-disable HW flow control (CTS). Some earlier code may re-enable it. */
-w32(SE_UART_TX_TRANS_CFG, 0);
-w32(SE_UART_RX_TRANS_CFG, 0);
+	/*
+	 * Hardcode the "golden" register values discovered from dumping the
+	 * state after Linux configures the clock. This bypasses the incomplete
+	 * baremetal clock library and guarantees the correct baud rate.
+	 */
+	const u32 RCG_BASE = GCC_BASE + 0x17270;
+	writel_relaxed(0x2601, RCG_BASE + 0x4); /* RCG CFG: SRC=GPLL0_MAIN, PRE_DIV=7, MODE=? */
+	writel_relaxed(0x180,  RCG_BASE + 0x8); /* RCG M */
+	writel_relaxed(0xc476, RCG_BASE + 0xc); /* RCG N */
+	writel_relaxed(0xc2f6, RCG_BASE + 0x10);/* RCG D */
+	writel_relaxed(0x1,    RCG_BASE + 0x0); /* RCG CMD: UPDATE */
 
-/* optional: ensure parity cfg still 0 */
-w32(SE_UART_TX_PARITY_CFG, 0);
-w32(SE_UART_RX_PARITY_CFG, 0);
+	/* Set the UART's internal divider. */
+	w32(GENI_SER_M_CLK_CFG, 0x41);
 
-/* Read back (for debug) */
-shm[23] = 0x5458434600000000ULL; /* "TXCF" tag */
-shm[24] = (u64)r32(SE_UART_TX_TRANS_CFG);
+	/* Force-disable HW flow control (CTS). */
+	w32(SE_UART_TX_TRANS_CFG, 0);
+	w32(SE_UART_RX_TRANS_CFG, 0);
+
+	/* optional: ensure parity cfg still 0 */
+	w32(SE_UART_TX_PARITY_CFG, 0);
+	w32(SE_UART_RX_PARITY_CFG, 0);
+}
+
+void uart2_dump_baud_regs(volatile u64 *shm, u32 *idx)
+{
+	shm[(*idx)++] = 0xBADDEADBEEFULL;
+	/* RCG registers for qupv3_wrap0_s2_clk_src at offset 0x17270 */
+	shm_put(shm, idx, "RCG_CFG", 0x17274, readl_relaxed(GCC_BASE + 0x17274));
+	shm_put(shm, idx, "RCG_M",   0x17278, readl_relaxed(GCC_BASE + 0x17278));
+	shm_put(shm, idx, "RCG_N",   0x1727C, readl_relaxed(GCC_BASE + 0x1727C));
+	shm_put(shm, idx, "RCG_D",   0x17280, readl_relaxed(GCC_BASE + 0x17280));
+	/* UART's internal clock divider register */
+	shm_put(shm, idx, "UART_CLK", 0x48, r32(GENI_SER_M_CLK_CFG));
+	shm[(*idx)++] = 0xBADDEADBEEFULL;
 }
