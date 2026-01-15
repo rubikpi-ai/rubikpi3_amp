@@ -971,7 +971,7 @@ void uart2_init(void)
 	w32(SE_GENI_TX_WATERMARK_REG, 2);
 	w32(SE_GENI_M_IRQ_CLEAR, M_CMD_DONE_EN);
 
-//	uart2_set_baud_linux_style(115200);
+	uart2_set_baud_linux_style(115200);
 	/* Force-disable HW flow control (CTS). Some earlier code may re-enable it. */
 w32(SE_UART_TX_TRANS_CFG, 0);
 w32(SE_UART_RX_TRANS_CFG, 0);
