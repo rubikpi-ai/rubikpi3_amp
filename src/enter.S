@@ -236,34 +236,69 @@ vectors:
 	vtentry el0_error_invalid
 
 el1_sync_invalid:
-	//inv_entry 1, BAD_SYNC
 	bl kernel_entry
 	mov x0, sp
-	mov x1, 0
+	mov x1, #BAD_SYNC
 	mrs x2, esr_el1
 	bl bad_mode
-	bl kernel_exit
+	/* bad_mode should call PSCI CPU_OFF, never return */
+	b . /* Should never reach here */
 
 el1_irq_invalid:
-	ldr x9, =_shared_memory
-	mov x10, #0xFEED
-	str x10, [x9, #0x128]
-	inv_entry 1, BAD_IRQ
+	bl kernel_entry
+	mov x0, sp
+	mov x1, #BAD_IRQ
+	mrs x2, esr_el1
+	bl bad_mode
+	b .
+
 el1_fiq_invalid:
-	ldr x9, =_shared_memory
-	mov x10, #0xFEEA
-	str x10, [x9, #0x128]
-	inv_entry 1, BAD_FIQ
+	bl kernel_entry
+	mov x0, sp
+	mov x1, #BAD_FIQ
+	mrs x2, esr_el1
+	bl bad_mode
+	b .
+
 el1_error_invalid:
-	inv_entry 1, BAD_ERROR
+	bl kernel_entry
+	mov x0, sp
+	mov x1, #BAD_ERROR
+	mrs x2, esr_el1
+	bl bad_mode
+	b .
+
 el0_sync_invalid:
-	inv_entry 0, BAD_SYNC
+	bl kernel_entry
+	mov x0, sp
+	mov x1, #BAD_SYNC
+	mrs x2, esr_el1
+	bl bad_mode
+	b .
+
 el0_irq_invalid:
-	inv_entry 0, BAD_IRQ
+	bl kernel_entry
+	mov x0, sp
+	mov x1, #BAD_IRQ
+	mrs x2, esr_el1
+	bl bad_mode
+	b .
+
 el0_fiq_invalid:
-	inv_entry 0, BAD_FIQ
+	bl kernel_entry
+	mov x0, sp
+	mov x1, #BAD_FIQ
+	mrs x2, esr_el1
+	bl bad_mode
+	b .
+
 el0_error_invalid:
-	inv_entry 0, BAD_ERROR
+	bl kernel_entry
+	mov x0, sp
+	mov x1, #BAD_ERROR
+	mrs x2, esr_el1
+	bl bad_mode
+	b .
 
 el1_irq:
         /*把中断现场时的lr寄存器保存到栈顶里，

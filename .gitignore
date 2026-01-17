@@ -1,3 +1,11 @@
 build
 rubikpi3_amp.bin
 *.map
+.*.cmd
+Module.symvers
+.*.o
+*.o
+*.mod*
+modules.order
+*.ko
+temp/

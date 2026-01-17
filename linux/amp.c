@@ -265,7 +265,7 @@ static ssize_t dbg_status_read(struct file *f, char __user *ubuf, size_t cnt, lo
 			"max_load_size=0x%zx\n"
 			"bytes_loaded=0x%llx\n"
 			"cpu_online=%d (must be 0 before start)\n"
-			"last_psci_ret=%lld (0x%llx)\n",
+			"last_psci_ret=%lld (0x%llx)\n"
 			"boot_via_secondary=%d\n"
 			"secondary_entry_va=0x%llx\n",
 			cpu,
@@ -438,7 +438,7 @@ static ssize_t dbg_reset_write(struct file *f, const char __user *ubuf, size_t c
 
 //	start_amp();
 
-	pr_info(DRV_NAME ": reset command sent via shm[%" __stringify(AMP_CMD_IDX) "]\n");
+	pr_info(DRV_NAME ": reset command sent via shm[%d]\n", AMP_CMD_IDX);
 	return cnt;
 }
 

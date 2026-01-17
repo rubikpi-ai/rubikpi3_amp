@@ -19,16 +19,18 @@ typedef __builtin_va_list va_list;
 unsigned char hex_tab[]={'0','1','2','3','4','5','6','7',\
 		                 '8','9','a','b','c','d','e','f'};
 
+extern void uart2_putc(char c);
+
 static int outc(int c)
 {
-//	__out_putchar(c);
+	uart2_putc(c);
 	return 0;
 }
 
 static int outs (const char *s)
 {
-//	while (*s != '\0')
-//		__out_putchar(*s++);
+	while (*s != '\0')
+		uart2_putc(*s++);
 	return 0;
 }
 
