@@ -106,14 +106,14 @@ void kernel_main(void)
 
 	uart2_init();
 //	uart2_init(115200, 19200000, 0);
-//	uart2_puts("uart2 hello\n");
+	uart2_puts("uart2 hello\n");
 
 	gpio_pinmux_set(14, mux_gpio);
 	gpio_direction_output(14, 1);
 	gpio_pinmux_set(44, mux_gpio);
 	gpio_direction_output(44, 0);
 
-	uart2_debug_dump_and_try_tx(shm, 200, "0123456789ABCDEF");
+//	uart2_debug_dump_and_try_tx(shm, 200, "0123456789ABCDEF");
 	//uart2_puts("hello world\n");
 
 	gicv3_init_for_cpu();
@@ -131,6 +131,19 @@ void kernel_main(void)
 	while (1) {
 		__asm__ volatile ("wfi");
 		shm[4] = shm[4] + 1;
+
+		/* Check for reset command from Linux */
+		if (shm[AMP_CMD_IDX] == AMP_CMD_RESET) {
+			/* Disable interrupts before CPU_OFF */
+			arch_local_irq_disable();
+
+			/* Call PSCI CPU_OFF to power down this CPU */
+			psci_cpu_off();
+
+			/* Should never reach here */
+			while (1)
+				;
+		}
 	}
 
 	return;

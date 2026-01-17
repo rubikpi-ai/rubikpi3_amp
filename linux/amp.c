@@ -22,9 +22,11 @@
 #include <asm/cacheflush.h>
 #include <asm/io.h>      // virt_to_phys
 #include <linux/kallsyms.h>
+#include <linux/firmware.h>
 
 #define DRV_NAME "ampcpu7"
 #define DEV_NAME "ampcpu7"
+#define FW_DEFAULT_NAME "rubikpi3_amp.bin"
 
 #define PSCI_0_2_FN64_CPU_ON  0xC4000003ULL
 
@@ -40,6 +42,8 @@ struct ampcpu_ctx {
 	phys_addr_t entry_pa;   /* payload entry PA, default 0xD0800000 */
 	phys_addr_t shm_pa;     /* shared memory PA, default 0xD7C00000 */
 	size_t max_load_size;   /* payload load limit */
+
+	char fw_name[128];
 
 	u64 bytes_loaded;
 	s64 last_psci_ret;
@@ -62,11 +66,13 @@ static struct ampcpu_ctx g = {
 	.mpidr = 0x700,
 	.entry_pa = 0xD0800000ULL,
 	.shm_pa = 0xD7C00000ULL,
-	.max_load_size = 10 * 1024 * 1024,
+	.max_load_size = 40 * 1024 * 1024,
 	.last_psci_ret = 0,
 
 	.boot_via_secondary = 0,
 	.secondary_entry_va = 0,
+
+	.fw_name = FW_DEFAULT_NAME,
 };
 
 static int psci_cpu_on(u64 mpidr, phys_addr_t entry_pa)
@@ -100,14 +106,17 @@ static void amp_flush_payload(phys_addr_t pa, size_t sz)
 }
 
 /* best-effort: write RESET command into shared memory */
-static int amp_send_reset_cmd_best_effort(void)
+static int stop_amp(void)
 {
 	void *va;
 	phys_addr_t cmd_pa;
 	u64 *p;
+	int cpu;
+	int retry;
 
 	mutex_lock(&g.lock);
 	cmd_pa = g.shm_pa + (phys_addr_t)(AMP_CMD_IDX * sizeof(u64));
+	cpu = g.target_cpu;
 	mutex_unlock(&g.lock);
 
 	va = memremap(cmd_pa, sizeof(u64), MEMREMAP_WB);
@@ -122,8 +131,21 @@ static int amp_send_reset_cmd_best_effort(void)
 
 	memunmap(va);
 
-	/* give CPU7 some time to observe and CPU_OFF */
-	msleep(50);
+	pr_info(DRV_NAME ": reset command sent, waiting for CPU%d to go offline...\n", cpu);
+
+	/* give CPU7 more time to observe and CPU_OFF */
+	msleep(100);
+
+	/* Wait for CPU to actually go offline, with timeout */
+	for (retry = 0; retry < 50; retry++) {
+		if (!cpu_online(cpu)) {
+			pr_info(DRV_NAME ": CPU%d is now offline after %d retries\n", cpu, retry);
+			return 0;
+		}
+		msleep(10);
+	}
+
+	pr_warn(DRV_NAME ": CPU%d still online after 500ms, proceeding anyway\n", cpu);
 	return 0;
 }
 
@@ -293,7 +315,7 @@ static const struct file_operations dbg_status_fops = {
 	.llseek = default_llseek,
 };
 
-static ssize_t dbg_start_write(struct file *f, const char __user *ubuf, size_t cnt, loff_t *ppos)
+static int start_amp(void)
 {
 	int cpu, ret;
 	u64 mpidr;
@@ -324,13 +346,52 @@ static ssize_t dbg_start_write(struct file *f, const char __user *ubuf, size_t c
 	pr_err(DRV_NAME ": PSCI CPU_ON mpidr=0x%llx entry=0x%llx ret=%d\n",
 	       (unsigned long long)mpidr, (unsigned long long)entry, ret);
 
-	return ret ? ret : cnt;
+	return ret;
+}
+
+static ssize_t dbg_start_write(struct file *f, const char __user *ubuf, size_t cnt, loff_t *ppos)
+{
+	return start_amp();
 }
 
 static const struct file_operations dbg_start_fops = {
 	.owner = THIS_MODULE,
 	.open = simple_open,
 	.write = dbg_start_write,
+	.llseek = default_llseek,
+};
+
+static ssize_t dbg_stop_write(struct file *f, const char __user *ubuf, size_t cnt, loff_t *ppos)
+{
+	int ret;
+	int cpu;
+
+	ret = stop_amp();
+	if (ret) {
+		pr_err(DRV_NAME ": stop_amp failed: %d\n", ret);
+		return ret;
+	}
+
+	mutex_lock(&g.lock);
+	cpu = g.target_cpu;
+	mutex_unlock(&g.lock);
+
+	pr_info(DRV_NAME ": calling add_cpu(%d)...\n", cpu);
+	ret = add_cpu(cpu);
+
+	if (ret) {
+		pr_err(DRV_NAME ": add_cpu(%d) failed: %d\n", cpu, ret);
+		return ret;
+	}
+
+	pr_info(DRV_NAME ": CPU%d successfully added back to Linux\n", cpu);
+	return cnt;
+}
+
+static const struct file_operations dbg_stop_fops = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.write = dbg_stop_write,
 	.llseek = default_llseek,
 };
 
@@ -371,9 +432,11 @@ static ssize_t dbg_reset_write(struct file *f, const char __user *ubuf, size_t c
 	int ret;
 
 	/* send reset cmd even if cpu is online/offline; baremetal decides */
-	ret = amp_send_reset_cmd_best_effort();
+	ret = stop_amp();
 	if (ret)
 		return ret;
+
+//	start_amp();
 
 	pr_info(DRV_NAME ": reset command sent via shm[%" __stringify(AMP_CMD_IDX) "]\n");
 	return cnt;
@@ -518,6 +581,47 @@ static const struct file_operations dbg_size_fops = {
 	.llseek = default_llseek,
 };
 
+static int amp_load_firmware(void)
+{
+	const struct firmware *fw;
+	size_t sz;
+	int ret;
+	void *va;
+
+	ret = request_firmware(&fw, g.fw_name, NULL);
+	if (ret) {
+		pr_err(DRV_NAME ": request_firmware('%s') failed: %d\n", g.fw_name, ret);
+		return ret;
+	}
+
+	sz = fw->size;
+	if (sz == 0 || sz > g.max_load_size) {
+		pr_err(DRV_NAME ": bad firmware size: %zu (max=%zu)\n", sz, g.max_load_size);
+		release_firmware(fw);
+		return -EINVAL;
+	}
+
+	va = memremap(g.entry_pa, sz, MEMREMAP_WB);
+	if (!va) {
+		pr_err(DRV_NAME ": memremap entry_pa=0x%llx sz=%zu failed\n",
+		       (unsigned long long)g.entry_pa, sz);
+		release_firmware(fw);
+		return -ENOMEM;
+	}
+
+	memcpy(va, fw->data, sz);
+
+	flush_cache_vmap((unsigned long)va, (unsigned long)va + sz);
+	flush_icache_range((unsigned long)va, (unsigned long)va + sz);
+
+	memunmap(va);
+	release_firmware(fw);
+
+	g.bytes_loaded = sz;
+
+	return 0;
+}
+
 /* -------------------- module init/exit -------------------- */
 
 static int __init ampcpu_init(void)
@@ -550,6 +654,17 @@ static int __init ampcpu_init(void)
 		goto err_class_destroy;
 	}
 
+	ret = amp_load_firmware();
+	if (!ret) {
+		if (cpu_online(g.target_cpu)) {
+			remove_cpu(g.target_cpu);
+		}
+		ret = start_amp();
+		printk("start_amp returned %d\n", ret);
+	} else {
+		pr_warn(DRV_NAME ": initial firmware load failed: %d\n", ret);
+	}
+
 	/* debugfs */
 	g.dbg_dir = debugfs_create_dir(DRV_NAME, NULL);
 	if (IS_ERR_OR_NULL(g.dbg_dir)) {
@@ -559,6 +674,7 @@ static int __init ampcpu_init(void)
 
 	debugfs_create_file("status", 0444, g.dbg_dir, NULL, &dbg_status_fops);
 	debugfs_create_file("start", 0200, g.dbg_dir, NULL, &dbg_start_fops);
+	debugfs_create_file("stop", 0200, g.dbg_dir, NULL, &dbg_stop_fops);
 	debugfs_create_file("reset", 0200, g.dbg_dir, NULL, &dbg_reset_fops);
 	debugfs_create_file("flush", 0200, g.dbg_dir, NULL, &dbg_flush_fops);
 
@@ -595,7 +711,7 @@ err_unregister:
 static void __exit ampcpu_exit(void)
 {
 	/* best-effort reset on unload */
-	amp_send_reset_cmd_best_effort();
+	stop_amp();
 
 	debugfs_remove_recursive(g.dbg_dir);
 	device_destroy(g.class, g.devt);
