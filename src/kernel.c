@@ -103,6 +103,7 @@ void irq_handler(void)
 //int uart2_init(unsigned int baud, unsigned long src_clk_hz, unsigned int clk_sel);
 void uart2_init(void);
 void uart2_debug_dump_and_try_tx(volatile u64 *shm, u32 shm_base_idx, const char *msg);
+int uart2_set_baud_linux_style(u32 baud);
 
 void kernel_main(void)
 {
@@ -119,7 +120,7 @@ void kernel_main(void)
 
 	uart2_init();
 //	uart2_init(115200, 19200000, 0);
-	uart2_puts("uart2 hello\n");
+	uart2_puts("uart2 hello rubikpi 123\n");
 
 	gpio_pinmux_set(14, mux_gpio);
 	gpio_direction_output(14, 1);
@@ -141,11 +142,13 @@ void kernel_main(void)
 
 	test[20] = 0x2020208;
 
-	printk("kernel_main: CPU %d, SCTLR_EL1=0x%x, CurrentEL=0x%x, SP=0x%x\n",
-	       read_mpidr_el1() & 0xff,
-	       read_sctlr_el1(),
-	       read_currentel(),
-	       read_sp());
+	//printk("kernel_main: CPU %d, SCTLR_EL1=0x%x, CurrentEL=0x%x, SP=0x%x\n",
+	//       read_mpidr_el1() & 0xff,
+	//       read_sctlr_el1(),
+	//       read_currentel(),
+	//       read_sp());
+
+	uart2_set_baud_linux_style(115200);
 
 	while (1) {
 		__asm__ volatile ("wfi");

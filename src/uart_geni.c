@@ -745,7 +745,7 @@ static void uart2_set_8n1_no_fc(void)
 	w32(SE_UART_RX_STALE_CNT, DEFAULT_BITS_PER_CHAR * STALE_TIMEOUT);
 }
 
-static int uart2_set_baud_linux_style(u32 baud)
+int uart2_set_baud_linux_style(u32 baud)
 {
 	u32 sampling = 32; /* 32 */
 	u32 ver = qup_wrap0_hw_version();
@@ -753,6 +753,8 @@ static int uart2_set_baud_linux_style(u32 baud)
 		sampling >>= 1; /* 16 */
 
 	u32 req = baud * sampling;
+
+	printk("uart2: set_baud %u, req %u\n", baud, req);
 
 	u32 clk_idx = 0, clk_rate = 0;
 	if (gcc_uart2_se_clk_config_for_req(req, &clk_idx, &clk_rate) != 0)
@@ -763,11 +765,13 @@ static int uart2_set_baud_linux_style(u32 baud)
 
 	u32 ser_clk_cfg = SER_CLK_EN | (clk_div << CLK_DIV_SHFT);
 
-	w32(GENI_SER_M_CLK_CFG, ser_clk_cfg);
-	w32(GENI_SER_S_CLK_CFG, ser_clk_cfg);
-	w32(SE_GENI_CLK_SEL, clk_idx & CLK_SEL_MSK);
-	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
-
+	printk("uart2: set_baud %u, req %u, clk_rate %u, clk_div %u, clk_idx %u\n",
+	       baud, req, clk_rate, clk_div, clk_idx);
+//	w32(GENI_SER_M_CLK_CFG, ser_clk_cfg);
+//	w32(GENI_SER_S_CLK_CFG, ser_clk_cfg);
+//	w32(SE_GENI_CLK_SEL, clk_idx & CLK_SEL_MSK);
+//	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
+//
 	return 0;
 }
 

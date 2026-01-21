@@ -23,14 +23,19 @@ extern void uart2_putc(char c);
 
 static int outc(int c)
 {
+	if (c == '\n')
+		uart2_putc('\r');
 	uart2_putc(c);
 	return 0;
 }
 
 static int outs (const char *s)
 {
-	while (*s != '\0')
+	while (*s != '\0') {
+		if (*s == '\n')
+			uart2_putc('\r');
 		uart2_putc(*s++);
+	}
 	return 0;
 }
 

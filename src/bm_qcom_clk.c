@@ -11,7 +11,7 @@
 
 #define RCG2_CMD_UPDATE        (1U << 0)
 
-#define RCG2_CFG_SRC_SEL_SHFT  0
+#define RCG2_CFG_SRC_SEL_SHFT  8
 #define RCG2_CFG_SRC_SEL_MSK   (0x7U << RCG2_CFG_SRC_SEL_SHFT)
 
 #define RCG2_CFG_SRC_DIV_SHFT  8
@@ -55,8 +55,11 @@ int bm_clk_set_rate_idx(const struct bm_clk_rcg2_branch *c, u32 idx)
 		return -3;
 
 	u32 hid = t->pre_div - 1U;
-	u32 cfg = 0;
-	cfg |= ((src_sel << RCG2_CFG_SRC_SEL_SHFT) & RCG2_CFG_SRC_SEL_MSK);
+	u32 cfg = gcc_r32(r->cmd_rcgr_off + RCG2_CFG_RCGR_OFF);
+	cfg &= ~RCG2_CFG_SRC_SEL_MSK;
+
+	cfg |= src_sel << RCG2_CFG_SRC_SEL_SHFT;
+
 	cfg |= ((hid << RCG2_CFG_SRC_DIV_SHFT) & RCG2_CFG_SRC_DIV_MSK);
 
 	u32 m = t->m;
@@ -76,11 +79,12 @@ int bm_clk_set_rate_idx(const struct bm_clk_rcg2_branch *c, u32 idx)
 
 	u32 base = r->cmd_rcgr_off;
 
-	gcc_w32(base + RCG2_CFG_RCGR_OFF, cfg);
-	gcc_w32(base + RCG2_M_OFF, m);
-	gcc_w32(base + RCG2_N_OFF, n);
-	gcc_w32(base + RCG2_D_OFF, d);
-	gcc_w32(base + RCG2_CMD_RCGR_OFF, RCG2_CMD_UPDATE);
+	//gcc_w32(base + RCG2_CFG_RCGR_OFF, cfg);
+	//gcc_w32(base + RCG2_M_OFF, m);
+	//gcc_w32(base + RCG2_N_OFF, n);
+	//gcc_w32(base + RCG2_D_OFF, d);
+	//gcc_w32(base + RCG2_CMD_RCGR_OFF, RCG2_CMD_UPDATE);
+	printk("bm_clk_set_rate_idx: cfg=0x%x, m=%x, n=%x, d=%x\n", cfg, m, n, d);
 
 	(void)gcc_r32(base + RCG2_CMD_RCGR_OFF);
 	return 0;
@@ -91,7 +95,7 @@ void bm_clk_enable(const struct bm_clk_rcg2_branch *c)
 	if (!c) return;
 	u32 v = gcc_r32(c->branch.enable_reg_off);
 	v |= c->branch.enable_mask;
-	gcc_w32(c->branch.enable_reg_off, v);
+	//gcc_w32(c->branch.enable_reg_off, v);
 }
 
 int bm_clk_freq_match(const struct bm_clk_rcg2_branch *c,
@@ -141,7 +145,7 @@ int bm_clk_config_for_req(const struct bm_clk_rcg2_branch *c,
 	ret = bm_clk_set_rate_idx(c, idx);
 	if (ret) return ret;
 
-	bm_clk_enable(c);
+	//bm_clk_enable(c);
 
 	if (idx_out) *idx_out = idx;
 	if (src_hz_out) *src_hz_out = src;
