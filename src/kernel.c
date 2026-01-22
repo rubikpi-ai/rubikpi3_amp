@@ -12,9 +12,10 @@
 #include <asm/irq.h>
 #include <asm/gic_v3.h>
 #include <asm/timer.h>
-#include <gcc_sc7280.h>
 #include <printk.h>
 #include <uart_geni.h>
+#include <clock.h>
+#include <clock_qcs6490.h>
 
 #define AMP_CMD_IDX  32
 #define AMP_CMD_RESET 0x52534554ULL /* 'RSET' */
@@ -122,6 +123,8 @@ void kernel_main(void)
 //	uart2_init(115200, 19200000, 0);
 	uart2_puts("uart2 hello rubikpi 123\n");
 
+	clk_set_rate(UART2_CLK, 115200 * 16); /* 16x oversampling */
+
 	gpio_pinmux_set(14, mux_gpio);
 	gpio_direction_output(14, 1);
 	gpio_pinmux_set(44, mux_gpio);
@@ -147,8 +150,6 @@ void kernel_main(void)
 	//       read_sctlr_el1(),
 	//       read_currentel(),
 	//       read_sp());
-
-	uart2_set_baud_linux_style(115200);
 
 	while (1) {
 		__asm__ volatile ("wfi");

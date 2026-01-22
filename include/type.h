@@ -108,5 +108,13 @@ typedef struct {
 #define DIV_ROUND_UP(n, d) (((n) + (d) - 1) / (d))
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
+#define clamp(val, lo, hi) ({ \
+      typeof(val) __val = (val); \
+      typeof(lo) __lo = (lo); \
+      typeof(hi) __hi = (hi); \
+      __val < __lo ? __lo : \
+      __val > __hi ? __hi : __val; \
+})
+
 #endif
 #endif /*BENOS_TYPE_H*/
