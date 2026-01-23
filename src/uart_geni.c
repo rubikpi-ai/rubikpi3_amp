@@ -258,25 +258,27 @@ static void uart2_dump_regs(volatile u64 *shm, u32 *idx)
 	shm_put(shm, idx, "QVER", QUPV3_HW_VER_REG, readl_relaxed(QUPV3_WRAP0_BASE + QUPV3_HW_VER_REG));
 }
 
-#define STALE_TIMEOUT			16
-#define DEFAULT_BITS_PER_CHAR		10
-
 static void uart2_set_8n1_no_fc(void)
 {
 	/* Truly disable flow-control: do NOT set UART_CTS_MASK */
-	w32(SE_UART_TX_TRANS_CFG, 0);        /* no parity, no CTS */
-	w32(SE_UART_TX_PARITY_CFG, 0);
+	w32(SE_UART_TX_TRANS_CFG, 0);        /* no CTS */
+	w32(SE_UART_TX_PARITY_CFG, 0);       /* no parity */
 
 	w32(SE_UART_RX_TRANS_CFG, 0);        /* no parity */
 	w32(SE_UART_RX_PARITY_CFG, 0);
 
-	w32(SE_UART_TX_WORD_LEN, 8);
-	w32(SE_UART_RX_WORD_LEN, 8);
+	w32(SE_UART_TX_WORD_LEN, BITS_PER_BYTE); /*	8 bits */
+	w32(SE_UART_RX_WORD_LEN, BITS_PER_BYTE); /*	8 bits */
 
-	w32(SE_UART_TX_STOP_BIT_LEN, TX_STOP_BIT_LEN_1);
+	w32(SE_UART_TX_STOP_BIT_LEN, TX_STOP_BIT_LEN_1); /*	1 stop bit */
 
 	/* stale timeout: keep as before */
 	w32(SE_UART_RX_STALE_CNT, DEFAULT_BITS_PER_CHAR * STALE_TIMEOUT);
+
+	w32(SE_GENI_M_IRQ_CLEAR, M_CMD_DONE_EN);
+
+	/* Set the UART's internal divider. */
+	w32(GENI_SER_M_CLK_CFG, 0x41);
 }
 
 static void geni_se_io_set_mode(u32 base)
@@ -381,6 +383,7 @@ static void geni_se_select_fifo_mode(u32 base)
 #define PACKING_LEN_SHIFT 1
 #define PACKING_STOP_BIT BIT(0)
 #define PACKING_VECTOR_SHIFT 10
+
 void geni_se_config_packing(u32 base, int bpw, int pack_words,
 			    bool msb_to_lsb, bool tx_cfg, bool rx_cfg)
 {
@@ -433,16 +436,15 @@ void geni_se_config_packing(u32 base, int bpw, int pack_words,
 	 */
 	if (pack_words || bpw == 32)
 		writel_relaxed(bpw / 16, base + SE_GENI_BYTE_GRAN);
-
 }
 
 void uart2_init(void)
 {
-	volatile u64 *shm = (volatile u64 *)0xD7C00000;
 	gpio_pinmux_set(10, mux_qup02);
 	gpio_pinmux_set(11, mux_qup02);
 
 	clk_enable(UART2_CLK);
+	clk_set_rate(UART2_CLK, 115200 * 16); /* 16x oversampling */
 
 	geni_se_config_packing(UART2_BASE, BITS_PER_BYTE, BYTES_PER_FIFO_WORD,
 			       false, true, true);
@@ -456,52 +458,7 @@ void uart2_init(void)
 	w32(SE_GENI_DMA_MODE_EN, 0);
 	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
 
-	//w32(SE_GENI_S_IRQ_EN, 0);
-	//w32(SE_GENI_M_IRQ_EN, 0);
-
 	uart2_set_8n1_no_fc();
-
-	u32 tx_trans_cfg;
-	u32 tx_parity_cfg = 0;	/* Disable Tx Parity */
-	u32 rx_trans_cfg = 0;
-	u32 rx_parity_cfg = 0;	/* Disable Rx Parity */
-	u32 stop_bit_len = 0;	/* Default stop bit length - 1 bit */
-	u32 bits_per_char;
-	tx_trans_cfg = UART_CTS_MASK;
-	bits_per_char = BITS_PER_BYTE;
-
-	w32(SE_UART_TX_TRANS_CFG, tx_trans_cfg);
-	w32(SE_UART_TX_PARITY_CFG, tx_parity_cfg);
-	w32(SE_UART_RX_TRANS_CFG, rx_trans_cfg);
-	w32(SE_UART_RX_PARITY_CFG, rx_parity_cfg);
-	w32(SE_UART_TX_WORD_LEN, bits_per_char);
-	w32(SE_UART_RX_WORD_LEN, bits_per_char);
-	w32(SE_UART_TX_STOP_BIT_LEN, stop_bit_len);
-
-	w32(SE_GENI_M_IRQ_CLEAR, M_CMD_DONE_EN);
-
-	/*
-	 * Hardcode the "golden" register values discovered from dumping the
-	 * state after Linux configures the clock. This bypasses the incomplete
-	 * baremetal clock library and guarantees the correct baud rate.
-	 */
-	const u32 RCG_BASE = GCC_BASE + 0x17270;
-	writel_relaxed(0x2601, RCG_BASE + 0x4); /* RCG CFG: SRC=GPLL0_MAIN, PRE_DIV=7, MODE=? */
-	writel_relaxed(0x180,  RCG_BASE + 0x8); /* RCG M */
-	writel_relaxed(0xc476, RCG_BASE + 0xc); /* RCG N */
-	writel_relaxed(0xc2f6, RCG_BASE + 0x10);/* RCG D */
-	writel_relaxed(0x1,    RCG_BASE + 0x0); /* RCG CMD: UPDATE */
-
-	/* Set the UART's internal divider. */
-	w32(GENI_SER_M_CLK_CFG, 0x41);
-
-	/* Force-disable HW flow control (CTS). */
-	w32(SE_UART_TX_TRANS_CFG, 0);
-	w32(SE_UART_RX_TRANS_CFG, 0);
-
-	/* optional: ensure parity cfg still 0 */
-	w32(SE_UART_TX_PARITY_CFG, 0);
-	w32(SE_UART_RX_PARITY_CFG, 0);
 }
 
 void uart2_dump_baud_regs(volatile u64 *shm, u32 *idx)

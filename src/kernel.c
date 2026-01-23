@@ -123,7 +123,7 @@ void kernel_main(void)
 //	uart2_init(115200, 19200000, 0);
 	uart2_puts("uart2 hello rubikpi 123\n");
 
-	clk_set_rate(UART2_CLK, 115200 * 16); /* 16x oversampling */
+	// clk_set_rate(UART2_CLK, 115200 * 16); /* 16x oversampling */
 
 	gpio_pinmux_set(14, mux_gpio);
 	gpio_direction_output(14, 1);

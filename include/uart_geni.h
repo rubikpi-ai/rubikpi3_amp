@@ -327,6 +327,8 @@
 #define S_COMMON_GENI_S_IRQ_EN	(GENMASK(5, 1) | GENMASK(13, 9) | \
 				 S_RX_FIFO_RD_ERR_EN | S_RX_FIFO_WR_ERR_EN)
 
+#define STALE_TIMEOUT                  16
+#define DEFAULT_BITS_PER_CHAR          10
 
 /* Optionally read HW fifo depth if you want; simplest is fixed threshold */
 #define UART_TX_FIFO_DEPTH_WORDS_DEFAULT 16

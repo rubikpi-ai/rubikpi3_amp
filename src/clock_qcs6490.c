@@ -70,14 +70,14 @@ static int update_config(struct clk *clk)
 	v = clock_r32(clk->enable_reg + CMD_REG);
 	v |= CMD_UPDATE;
 
-//	clock_w32(clk->enable_reg + CMD_REG, v);
+	clock_w32(clk->enable_reg + CMD_REG, v);
 
-//	for (count = 500; count > 0; count--) {
-//		v = clock_r32(clk->enable_reg + CMD_REG);
-//		if (!(v & CMD_UPDATE))
+	for (count = 500; count > 0; count--) {
+		v = clock_r32(clk->enable_reg + CMD_REG);
+		if (!(v & CMD_UPDATE))
 			return 0;
-//		delay(0xffffff);
-//	}
+		delay(0xffff);
+	}
 
 	return -EBUSY;
 }
@@ -110,9 +110,10 @@ int qcom_find_src_index(struct clk *clk, const struct parent_map *map, u8 src)
 {
 	int i, num_parents = clk->num_parents;
 
-	for (i = 0; i < num_parents; i++)
+	for (i = 0; i < num_parents; i++) {
 		if (src == map[i].src)
 			return i;
+	}
 
 	return -ENOENT;
 }
@@ -134,7 +135,7 @@ static __clk_rcg2_configure_parent(struct clk *clk, u8 src, u32 *_cfg)
 static int __clk_rcg2_configure_mnd(struct clk *rcg, const struct freq_tbl *f,
 				u32 *_cfg)
 {
-	u32 cfg, mask, d_val, not2d_val, n_minus_m, v;
+	u32 cfg, mask, d_val, not2d_val, n_minus_m, v = 0;
 	int ret;
 
 	if (rcg->mnd_width && f->n) {
@@ -143,14 +144,13 @@ static int __clk_rcg2_configure_mnd(struct clk *rcg, const struct freq_tbl *f,
 		v = clock_r32(rcg->enable_reg + M_REG);
 		v &= ~mask;
 		v |= f->m;
-	//	clock_w32(rcg->enable_reg + M_REG, v);
+		clock_w32(rcg->enable_reg + M_REG, v);
 		printk("M_REG set to 0x%x\n", v);
-
 
 		v = clock_r32(rcg->enable_reg + N_REG);
 		v &= ~mask;
 		v |= ~(f->n - f->m);
-	//	clock_w32(rcg->enable_reg + N_REG, v);
+		clock_w32(rcg->enable_reg + N_REG, v);
 		printk("N_REG set to 0x%x\n", v);
 
 		/* Calculate 2d value */
@@ -165,7 +165,7 @@ static int __clk_rcg2_configure_mnd(struct clk *rcg, const struct freq_tbl *f,
 		v = clock_r32(rcg->enable_reg + D_REG);
 		v &= ~mask;
 		v |= not2d_val;
-		//clock_w32(rcg->enable_reg + D_REG, v);
+		clock_w32(rcg->enable_reg + D_REG, v);
 		printk("D_REG set to 0x%x\n", v);
 	}
 
@@ -217,7 +217,7 @@ void gcc_qupv3_wrap0_s2_clk_src_set_rate(struct clk *clk, u32 rate)
 	if (ret)
 		return;
 
-	//clock_w32(clk->enable_reg + CFG_REG, cfg);
+	clock_w32(clk->enable_reg + CFG_REG, cfg);
 	printk("CFG_REG set to 0x%x\n", cfg);
 
 	update_config(clk);
@@ -284,6 +284,7 @@ struct clk gcc_qupv3_wrap0_s2_clk_src = {
 	.src = NULL,
 	.ftbl = (struct freq_tbl *)ftbl_gcc_qupv3_wrap0_s2_clk_src,
 	.parent_map = (struct parent_map *)gcc_parent_map_0,
+	.num_parents = ARRAY_SIZE(gcc_parent_map_0),
 };
 
 struct clk gcc_qupv3_wrap0_s2_clk = {
