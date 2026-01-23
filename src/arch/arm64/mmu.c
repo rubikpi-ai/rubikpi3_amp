@@ -1,10 +1,10 @@
-#include <asm/pgtable.h>
-#include <asm/pgtable_prot.h>
-#include <asm/pgtable_hwdef.h>
-#include <asm/sysregs.h>
-#include <asm/barrier.h>
+#include <pgtable.h>
+#include <pgtable_prot.h>
+#include <pgtable_hwdef.h>
+#include <sysregs.h>
+#include <barrier.h>
 #include <string.h>
-#include <asm/base.h>
+#include <base.h>
 #include <page_alloc.h>
 
 #define NO_BLOCK_MAPPINGS BIT(0)

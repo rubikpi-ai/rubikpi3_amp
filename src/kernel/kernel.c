@@ -1,17 +1,17 @@
-#include <asm/pgtable.h>
-#include <asm/pgtable_prot.h>
-#include <asm/pgtable_hwdef.h>
-#include <asm/sysregs.h>
-#include <asm/barrier.h>
+#include <pgtable.h>
+#include <pgtable_prot.h>
+#include <pgtable_hwdef.h>
+#include <sysregs.h>
+#include <barrier.h>
 #include <string.h>
 #include <mm.h>
 #include <mmu.h>
 #include <page_alloc.h>
-#include <asm/gpio.h>
-#include <asm/ptregs.h>
-#include <asm/irq.h>
-#include <asm/gic_v3.h>
-#include <asm/timer.h>
+#include <gpio.h>
+#include <ptregs.h>
+#include <irq.h>
+#include <gic_v3.h>
+#include <timer.h>
 #include <printk.h>
 #include <uart_geni.h>
 #include <clock.h>
@@ -121,7 +121,7 @@ void kernel_main(void)
 
 	uart2_init();
 //	uart2_init(115200, 19200000, 0);
-	uart2_puts("uart2 hello rubikpi 123\n");
+	uart2_puts("uart2 hello rubikpi 123456\n");
 
 	// clk_set_rate(UART2_CLK, 115200 * 16); /* 16x oversampling */
 

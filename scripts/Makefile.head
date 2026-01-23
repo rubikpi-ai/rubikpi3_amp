@@ -1,0 +1,28 @@
+# Figure out what we need to build from the various variables
+# ===========================================================================
+
+# These flags are needed for compiling
+_c_flags       = $(CFLAGS) $(EXTRA_CFLAGS) $(CFLAGS_$(basetarget).o)
+_a_flags       = $(AFLAGS) $(EXTRA_AFLAGS) $(AFLAGS_$(basetarget).o)
+_cpp_flags     = $(CPPFLAGS) $(EXTRA_CPPFLAGS) $(CPPFLAGS_$(@F))
+
+c_flags        = -Wp,-MD,$(depfile) $(NOSTDINC_FLAGS) $(CPPFLAGS) $(_c_flags)
+a_flags        = -Wp,-MD,$(depfile) $(NOSTDINC_FLAGS) $(CPPFLAGS) $(_a_flags)
+cpp_flags      = -Wp,-MD,$(depfile) $(NOSTDINC_FLAGS) $(_cpp_flags)
+ld_flags       = $(LDFLAGS) $(EXTRA_LDFLAGS)
+
+# Finds the multi-part object the current object will be linked into
+modname-multi = $(sort $(foreach m,$(multi-used),\
+		$(if $(filter $(subst $(obj)/,,$*.o), $($(m:.o=-objs)) $($(m:.o=-y))),$(m:.o=))))
+
+# Commands useful for building a boot image
+# ===========================================================================
+
+# Linking
+quiet_cmd_ld = LD      $@
+cmd_ld = $(LD) $(LDFLAGS) $(EXTRA_LDFLAGS) $(LDFLAGS_$(@F)) \
+	       $(filter-out FORCE,$^) -o $@
+
+# Objcopy
+quiet_cmd_objcopy = OBJCOPY $@
+cmd_objcopy = $(OBJCOPY) $(OBJCOPYFLAGS) $(OBJCOPYFLAGS_$(@F)) $< $@

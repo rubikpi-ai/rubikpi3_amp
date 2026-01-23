@@ -1,16 +1,16 @@
-#include <asm/pgtable.h>
-#include <asm/pgtable_prot.h>
-#include <asm/pgtable_hwdef.h>
-#include <asm/sysregs.h>
-#include <asm/barrier.h>
+#include <pgtable.h>
+#include <pgtable_prot.h>
+#include <pgtable_hwdef.h>
+#include <sysregs.h>
+#include <barrier.h>
 #include <string.h>
 #include <mm.h>
 #include <mmu.h>
 #include <page_alloc.h>
-#include <asm/gpio.h>
+#include <gpio.h>
 #include <type.h>
-#include <asm/irq.h>
-#include <asm/gic_v3.h>
+#include <irq.h>
+#include <gic_v3.h>
 
 static inline u32 mmio_read32(u64 addr) { return *(volatile u32 *)addr; }
 static inline void mmio_write32(u64 addr, u32 v) { *(volatile u32 *)addr = v; }

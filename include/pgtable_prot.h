@@ -1,7 +1,7 @@
 #ifndef ASM_PGTABLE_PROT_H
 #define ASM_PGTABLE_PROT_H
 
-#include <asm/pgtable_hwdef.h>
+#include <pgtable_hwdef.h>
 
 /*
  * Software defined PTE bits definition.

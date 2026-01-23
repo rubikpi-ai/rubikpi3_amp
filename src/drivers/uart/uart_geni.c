@@ -1,6 +1,6 @@
 #include <type.h>
 #include <uart_geni.h>
-#include <asm/gpio.h>
+#include <gpio.h>
 #include <clock.h>
 #include <clock_qcs6490.h>
 

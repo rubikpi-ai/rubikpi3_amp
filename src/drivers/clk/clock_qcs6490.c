@@ -145,13 +145,11 @@ static int __clk_rcg2_configure_mnd(struct clk *rcg, const struct freq_tbl *f,
 		v &= ~mask;
 		v |= f->m;
 		clock_w32(rcg->enable_reg + M_REG, v);
-		printk("M_REG set to 0x%x\n", v);
 
 		v = clock_r32(rcg->enable_reg + N_REG);
 		v &= ~mask;
 		v |= ~(f->n - f->m);
 		clock_w32(rcg->enable_reg + N_REG, v);
-		printk("N_REG set to 0x%x\n", v);
 
 		/* Calculate 2d value */
 		d_val = f->n;
@@ -166,7 +164,6 @@ static int __clk_rcg2_configure_mnd(struct clk *rcg, const struct freq_tbl *f,
 		v &= ~mask;
 		v |= not2d_val;
 		clock_w32(rcg->enable_reg + D_REG, v);
-		printk("D_REG set to 0x%x\n", v);
 	}
 
 	mask = BIT(rcg->hid_width) - 1;
@@ -218,7 +215,6 @@ void gcc_qupv3_wrap0_s2_clk_src_set_rate(struct clk *clk, u32 rate)
 		return;
 
 	clock_w32(clk->enable_reg + CFG_REG, cfg);
-	printk("CFG_REG set to 0x%x\n", cfg);
 
 	update_config(clk);
 }

@@ -1,5 +1,5 @@
 #include <type.h>
-#include <asm/types.h>
+#include <types.h>
 #include <string.h>
 
 size_t strlen(const char *s)

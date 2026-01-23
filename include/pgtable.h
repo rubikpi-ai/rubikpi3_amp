@@ -1,10 +1,10 @@
 #ifndef ASM_PGTABLE_H
 #define ASM_PGTABLE_H
 
-#include <asm/pgtable_hwdef.h>
-#include <asm/pgtable_types.h>
+#include <pgtable_hwdef.h>
+#include <pgtable_types.h>
 #include <mm.h>
-#include <asm/barrier.h>
+#include <barrier.h>
 
 extern char idmap_pg_dir[];
 extern char init_pg_dir[];

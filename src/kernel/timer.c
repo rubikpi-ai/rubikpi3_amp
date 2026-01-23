@@ -1,15 +1,15 @@
-#include <asm/pgtable.h>
-#include <asm/pgtable_prot.h>
-#include <asm/pgtable_hwdef.h>
-#include <asm/sysregs.h>
-#include <asm/barrier.h>
+#include <pgtable.h>
+#include <pgtable_prot.h>
+#include <pgtable_hwdef.h>
+#include <sysregs.h>
+#include <barrier.h>
 #include <string.h>
 #include <mm.h>
 #include <mmu.h>
 #include <page_alloc.h>
-#include <asm/gpio.h>
+#include <gpio.h>
 #include <type.h>
-#include <asm/irq.h>
+#include <irq.h>
 
 /* Virtual timer CNTV */
 static inline void write_cntv_tval_el0(u64 v) {

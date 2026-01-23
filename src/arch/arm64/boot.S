@@ -1,6 +1,6 @@
 #include <mm.h>
-#include <asm/sysregs.h>
-#include <asm/pgtable_prot.h>
+#include <sysregs.h>
+#include <pgtable_prot.h>
 
 .section ".text.boot"
 

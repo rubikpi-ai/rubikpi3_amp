@@ -1,5 +1,5 @@
 #include <type.h>
-#include <asm/gpio.h>
+#include <gpio.h>
 #include <io.h>
 
 #define ACCESSOR(name) \

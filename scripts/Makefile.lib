@@ -1,0 +1,21 @@
+# Common Makefile functions for Linux-style build system
+
+# Define a function to convert obj-y to object files
+# Usage: $(eval $(call obj-macro, subdir, obj-list))
+define obj-macro
+$(1)_y := $$(addprefix $(1)/,$(2))
+
+$(1)_c_y := $$(filter %.c.o, $$($(1)_y))
+$(1)_s_y := $$(filter %.S.o, $$($(1)_y))
+
+$(1)_c_srcs := $$($(1)_c_y:.o=.c)
+$(1)_s_srcs := $$($(1)_s_y:.o=.S)
+
+$(1)_c_objs := $$(addprefix $$(BUILD_DIR)/,$$($(1)_c_srcs:.c=_c.o))
+$(1)_s_objs := $$(addprefix $$(BUILD_DIR)/,$$($(1)_s_srcs:.S=_s.o))
+
+OBJECTS += $$($(1)_c_objs) $$($(1)_s_objs)
+
+$(1)_deps := $$($(1)_c_objs:%.o=%.d) $$($(1)_s_objs:%.o=%.d)
+-include $$($(1)_deps)
+endef
