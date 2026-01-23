@@ -1,6 +1,7 @@
 #ifndef __ASM_ARCH_IRQ_H
 #define __ASM_ARCH_IRQ_H
 #include <type.h>
+#include <ptregs.h>
 
 static inline void arch_local_irq_enable(void)
 {
@@ -64,6 +65,7 @@ static inline u32 read_icc_iar1_el1(void) {
 static inline void write_icc_eoir1_el1(u32 v) { SYSREG_WRITE64("S3_0_C12_C12_1", (u64)v); }
 static inline void write_icc_dir_el1(u32 v)  { SYSREG_WRITE64("S3_0_C12_C11_1", (u64)v); }
 
-
+void bad_mode(struct pt_regs *regs, int reason, unsigned int esr);
+void irq_handler(void);
 
 #endif /* __ASM_ARCH_IRQ_H */

@@ -1,3 +1,5 @@
+#ifndef __PTREGS_H
+#define __PTREGS_H
 /*
  * pt_regs栈框，用来保存中断现场或者异常现场
  *
@@ -16,3 +18,5 @@ struct pt_regs {
 	unsigned long pc;
 	unsigned long pstate;
 };
+
+#endif /* __PTREGS_H */
