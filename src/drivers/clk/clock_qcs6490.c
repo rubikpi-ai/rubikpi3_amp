@@ -21,10 +21,13 @@ enum {
 	P_GCC_MSS_GPLL0_MAIN_DIV_CLK,
 };
 
+/* Forward declarations */
+struct clk gcc_qupv3_wrap0_s1_clk;
 struct clk gcc_qupv3_wrap0_s2_clk;
 
 struct clk *clock_resource[]  = {
 	[UART2_CLK] = &gcc_qupv3_wrap0_s2_clk,
+	[I2C1_CLK] = &gcc_qupv3_wrap0_s1_clk,
 };
 
 static inline u32 clock_r32(u32 off) { return readl((u32)(GCC_BASE + off)); }
@@ -235,9 +238,8 @@ void gcc_qupv3_get_rate_call_parent(struct clk *clk)
 	clk->src->ops->get_rate(clk->src);
 }
 
-u8 gcc_qupv3_wrap0_s2_clk_src_set_parent(struct clk *clk, int index)
+u32 gcc_qupv3_wrap0_s2_clk_src_set_parent(struct clk *clk, int index)
 {
-	int ret;
 	u32 cfg = clk->parent_map[index].cfg << CFG_SRC_SEL_SHIFT;
 	u32 v;
 
@@ -289,5 +291,102 @@ struct clk gcc_qupv3_wrap0_s2_clk = {
 	.name = "gcc_qupv3_wrap0_s2_clk",
 	.src = &gcc_qupv3_wrap0_s2_clk_src,
 	.ops = &gcc_qupv3_wrap0_s2_clk_ops,
+	.ftbl = NULL,
+};
+
+/*
+ * I2C1 clock: GCC_QUPV3_WRAP0_S1_CLK
+ * cmd_rcgr: 0x17140
+ * enable_reg: 0x52008, bit 11
+ */
+
+/* I2C/SPI typically use 19.2 MHz source clock */
+static const struct freq_tbl ftbl_gcc_qupv3_wrap0_s1_clk_src[] = {
+	F(7372800, P_GCC_GPLL0_OUT_EVEN, 1, 384, 15625),
+	F(14745600, P_GCC_GPLL0_OUT_EVEN, 1, 768, 15625),
+	F(19200000, P_BI_TCXO, 1, 0, 0),
+	F(29491200, P_GCC_GPLL0_OUT_EVEN, 1, 1536, 15625),
+	F(32000000, P_GCC_GPLL0_OUT_EVEN, 1, 8, 75),
+	F(48000000, P_GCC_GPLL0_OUT_EVEN, 1, 4, 25),
+	F(52174000, P_GCC_GPLL0_OUT_MAIN, 1, 2, 23),
+	F(64000000, P_GCC_GPLL0_OUT_EVEN, 1, 16, 75),
+	F(75000000, P_GCC_GPLL0_OUT_EVEN, 4, 0, 0),
+	F(80000000, P_GCC_GPLL0_OUT_EVEN, 1, 4, 15),
+	F(96000000, P_GCC_GPLL0_OUT_EVEN, 1, 8, 25),
+	F(100000000, P_GCC_GPLL0_OUT_MAIN, 6, 0, 0),
+	{ },
+};
+
+void gcc_qupv3_wrap0_s1_clk_src_set_rate(struct clk *clk, u32 rate)
+{
+	struct freq_tbl *f;
+	u32 cfg;
+	int ret;
+
+	if (!clk || !clk->ftbl)
+		return;
+
+	f = qcom_find_freq(clk->ftbl, rate);
+	if (!f)
+		return;
+
+	cfg = clock_r32(clk->enable_reg + CFG_REG);
+
+	ret = __clk_rcg2_configure(clk, f, &cfg);
+	if (ret)
+		return;
+
+	clock_w32(clk->enable_reg + CFG_REG, cfg);
+
+	update_config(clk);
+}
+
+u32 gcc_qupv3_wrap0_s1_clk_src_set_parent(struct clk *clk, int index)
+{
+	u32 cfg = clk->parent_map[index].cfg << CFG_SRC_SEL_SHIFT;
+	u32 v;
+
+	if (!clk)
+		return -1;
+
+	v = clock_r32(clk->enable_reg + CFG_REG);
+	v &= ~CFG_SRC_SEL_MASK;
+	v |= cfg;
+
+	clock_w32(clk->enable_reg, v);
+
+	return update_config(clk);
+}
+
+struct clk_ops gcc_qupv3_wrap0_s1_clk_src_ops = {
+	.set_parent = gcc_qupv3_wrap0_s1_clk_src_set_parent,
+	.set_rate = gcc_qupv3_wrap0_s1_clk_src_set_rate,
+};
+
+struct clk_ops gcc_qupv3_wrap0_s1_clk_ops = {
+	.enable = gcc_qupv3_generic_clk_enable,
+	.disable = gcc_qupv3_generic_clk_disable,
+	.set_rate = gcc_qupv3_set_rate_call_parent,
+};
+
+struct clk gcc_qupv3_wrap0_s1_clk_src = {
+	.name = "gcc_qupv3_wrap0_s1_clk_src",
+	.enable_reg = 0x17140,
+	.enable_mask = 0,
+	.mnd_width = 16,
+	.hid_width = 5,
+	.ops = &gcc_qupv3_wrap0_s1_clk_src_ops,
+	.src = NULL,
+	.ftbl = (struct freq_tbl *)ftbl_gcc_qupv3_wrap0_s1_clk_src,
+	.parent_map = (struct parent_map *)gcc_parent_map_0,
+	.num_parents = ARRAY_SIZE(gcc_parent_map_0),
+};
+
+struct clk gcc_qupv3_wrap0_s1_clk = {
+	.enable_reg = 0x52008,
+	.enable_mask = BIT(11),
+	.name = "gcc_qupv3_wrap0_s1_clk",
+	.src = &gcc_qupv3_wrap0_s1_clk_src,
+	.ops = &gcc_qupv3_wrap0_s1_clk_ops,
 	.ftbl = NULL,
 };

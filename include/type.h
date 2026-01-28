@@ -41,15 +41,19 @@
 #define _BITUL(x)	(_UL(1) << (x))
 #define _BITULL(x)	(_ULL(1) << (x))
 
-#define GENMASK_ULL(h, l) \
-	(((~0ULL) - (1ULL << (l)) + 1) & \
-	 (~0ULL >> (BITS_PER_LONG - 1 - (h))))
-
 #ifndef __ASSEMBLY__
 #define BITS_PER_LONG 64
 #define BIT_ULL(nr)	(1ULL << (nr))
 #define BIT_MASK(nr)	(1UL << ((nr) % BITS_PER_LONG))
 #define BIT_WORD(nr)	((nr) / BITS_PER_LONG)
+
+#define GENMASK_ULL(h, l) \
+	(((~0ULL) - (1ULL << (l)) + 1) & \
+	 (~0ULL >> (BITS_PER_LONG - 1 - (h))))
+
+#define GENMASK(h, l) \
+	(((~0UL) - (1UL << (l)) + 1) & \
+	 (~0UL >> (BITS_PER_LONG - 1 - (h))))
 
 #define __ALIGN_MASK(x, mask)	(((x) + (mask)) & ~(mask))
 #define ALIGN(x, a) __ALIGN_MASK(x, (typeof(x))(a) - 1)
