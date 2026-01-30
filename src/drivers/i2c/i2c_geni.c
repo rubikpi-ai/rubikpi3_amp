@@ -9,25 +9,12 @@
 
 #include <type.h>
 #include <i2c_geni.h>
-#include <uart_geni.h>	/* For common GENI SE register definitions */
+#include <geni_se.h>
 #include <gpio.h>
 #include <clock.h>
 #include <clock_qcs6490.h>
 
-#define BITS_PER_BYTE		8
-#define BYTES_PER_FIFO_WORD	4U
 #define I2C_TIMEOUT		1000000
-
-/* MMIO helpers */
-static inline u32 i2c_r32(u64 base, u32 off)
-{
-	return *(volatile u32 *)(base + off);
-}
-
-static inline void i2c_w32(u64 base, u32 off, u32 v)
-{
-	*(volatile u32 *)(base + off) = v;
-}
 
 /*
  * I2C clock timing configuration for 19.2 MHz source clock
@@ -63,131 +50,6 @@ static const struct geni_i2c_clk_fld *geni_i2c_find_clk_fld(u32 clk_freq)
 	return NULL;
 }
 
-static void geni_i2c_se_irq_clear(u64 base)
-{
-	i2c_w32(base, SE_GSI_EVENT_EN, 0);
-	i2c_w32(base, SE_GENI_M_IRQ_CLEAR, 0xffffffff);
-	i2c_w32(base, SE_GENI_S_IRQ_CLEAR, 0xffffffff);
-	i2c_w32(base, SE_DMA_TX_IRQ_CLR, 0xffffffff);
-	i2c_w32(base, SE_DMA_RX_IRQ_CLR, 0xffffffff);
-}
-
-static void geni_i2c_se_io_init(u64 base)
-{
-	u32 val;
-
-	/* Enable clock gating */
-	val = i2c_r32(base, SE_GENI_CGC_CTRL);
-	val |= DEFAULT_CGC_EN;
-	i2c_w32(base, SE_GENI_CGC_CTRL, val);
-
-	/* Enable DMA clocks */
-	val = i2c_r32(base, SE_DMA_GENERAL_CFG);
-	val |= AHB_SEC_SLV_CLK_CGC_ON | DMA_AHB_SLV_CLK_CGC_ON;
-	val |= DMA_TX_CLK_CGC_ON | DMA_RX_CLK_CGC_ON;
-	i2c_w32(base, SE_DMA_GENERAL_CFG, val);
-
-	/* Set default IO output control */
-	i2c_w32(base, GENI_OUTPUT_CTRL, DEFAULT_IO_OUTPUT_CTRL_MSK);
-	i2c_w32(base, GENI_FORCE_DEFAULT_REG, FORCE_DEFAULT);
-}
-
-static void geni_i2c_se_set_mode(u64 base)
-{
-	u32 val;
-
-	/* Enable GENI M/S IRQs and DMA IRQs */
-	val = i2c_r32(base, SE_IRQ_EN);
-	val |= GENI_M_IRQ_EN | GENI_S_IRQ_EN;
-	val |= DMA_TX_IRQ_EN | DMA_RX_IRQ_EN;
-	i2c_w32(base, SE_IRQ_EN, val);
-
-	/* Disable DMA mode, use FIFO */
-	val = i2c_r32(base, SE_GENI_DMA_MODE_EN);
-	val &= ~GENI_DMA_MODE_EN;
-	i2c_w32(base, SE_GENI_DMA_MODE_EN, val);
-
-	/* Disable GSI events */
-	i2c_w32(base, SE_GSI_EVENT_EN, 0);
-}
-
-static u32 geni_i2c_get_tx_fifo_depth(u64 base)
-{
-	u32 val = i2c_r32(base, SE_HW_PARAM_0);
-	return (val >> 16) & 0x3F;
-}
-
-static void geni_i2c_se_init(u64 base, u32 tx_wm, u32 rx_wm)
-{
-	u32 val;
-
-	geni_i2c_se_irq_clear(base);
-	geni_i2c_se_io_init(base);
-	geni_i2c_se_set_mode(base);
-
-	/* Set watermarks */
-	i2c_w32(base, SE_GENI_TX_WATERMARK_REG, tx_wm);
-	i2c_w32(base, SE_GENI_RX_WATERMARK_REG, rx_wm);
-
-	/* Enable M_IRQs for I2C */
-	val = i2c_r32(base, SE_GENI_M_IRQ_EN);
-	val |= M_COMMON_GENI_M_IRQ_EN;
-	val |= M_CMD_DONE_EN | M_TX_FIFO_WATERMARK_EN;
-	val |= M_RX_FIFO_WATERMARK_EN | M_RX_FIFO_LAST_EN;
-	i2c_w32(base, SE_GENI_M_IRQ_EN, val);
-}
-
-static void geni_i2c_config_packing(u64 base, int bpw, int pack_words,
-				    bool msb_to_lsb, bool tx_cfg, bool rx_cfg)
-{
-	u32 cfg0, cfg1, cfg[4] = {0};
-	int len, idx, idx_start, idx_delta;
-	int ceil_bpw, iter, temp_bpw;
-	int i;
-
-	idx_start = msb_to_lsb ? bpw - 1 : 0;
-	idx = idx_start;
-	idx_delta = msb_to_lsb ? -BITS_PER_BYTE : BITS_PER_BYTE;
-	ceil_bpw = ALIGN(bpw, BITS_PER_BYTE);
-	iter = (ceil_bpw * pack_words) / BITS_PER_BYTE;
-	temp_bpw = bpw;
-
-	if (iter <= 0 || iter > 4)
-		return;
-
-	for (i = 0; i < iter; i++) {
-		len = (temp_bpw < BITS_PER_BYTE ? temp_bpw : BITS_PER_BYTE) - 1;
-		cfg[i] = idx << 5;			/* PACKING_START_SHIFT */
-		cfg[i] |= msb_to_lsb << 4;		/* PACKING_DIR_SHIFT */
-		cfg[i] |= len << 1;			/* PACKING_LEN_SHIFT */
-
-		if (temp_bpw <= BITS_PER_BYTE) {
-			idx = ((i + 1) * BITS_PER_BYTE) + idx_start;
-			temp_bpw = bpw;
-		} else {
-			idx = idx + idx_delta;
-			temp_bpw = temp_bpw - BITS_PER_BYTE;
-		}
-	}
-	cfg[iter - 1] |= 1;  /* PACKING_STOP_BIT */
-
-	cfg0 = cfg[0] | (cfg[1] << 10);
-	cfg1 = cfg[2] | (cfg[3] << 10);
-
-	if (tx_cfg) {
-		i2c_w32(base, SE_GENI_TX_PACKING_CFG0, cfg0);
-		i2c_w32(base, SE_GENI_TX_PACKING_CFG1, cfg1);
-	}
-	if (rx_cfg) {
-		i2c_w32(base, SE_GENI_RX_PACKING_CFG0, cfg0);
-		i2c_w32(base, SE_GENI_RX_PACKING_CFG1, cfg1);
-	}
-
-	/* BYTE_GRAN: 0 = 4x8 (four words, max 8 bits each) */
-	if (pack_words || bpw == 32)
-		i2c_w32(base, SE_GENI_BYTE_GRAN, bpw / 16);
-}
-
 static void geni_i2c_conf(struct geni_i2c_dev *gi2c)
 {
 	const struct geni_i2c_clk_fld *itr = gi2c->clk_fld;
@@ -197,17 +59,17 @@ static void geni_i2c_conf(struct geni_i2c_dev *gi2c)
 		return;
 
 	/* Select clock source 0 */
-	i2c_w32(gi2c->base, SE_GENI_CLK_SEL, 0);
+	geni_write32(gi2c->base, SE_GENI_CLK_SEL, 0);
 
 	/* Configure clock divider */
-	val = (itr->clk_div << 4) | SER_CLK_EN;
-	i2c_w32(gi2c->base, GENI_SER_M_CLK_CFG, val);
+	val = (itr->clk_div << CLK_DIV_SHFT) | SER_CLK_EN;
+	geni_write32(gi2c->base, GENI_SER_M_CLK_CFG, val);
 
 	/* Configure SCL timing counters */
 	val = itr->t_high_cnt << HIGH_COUNTER_SHFT;
 	val |= itr->t_low_cnt << LOW_COUNTER_SHFT;
 	val |= itr->t_cycle_cnt;
-	i2c_w32(gi2c->base, SE_I2C_SCL_COUNTERS, val);
+	geni_write32(gi2c->base, SE_I2C_SCL_COUNTERS, val);
 }
 
 static int geni_i2c_wait_cmd_done(struct geni_i2c_dev *gi2c)
@@ -215,38 +77,38 @@ static int geni_i2c_wait_cmd_done(struct geni_i2c_dev *gi2c)
 	u32 m_stat, timeout = I2C_TIMEOUT;
 
 	while (timeout--) {
-		m_stat = i2c_r32(gi2c->base, SE_GENI_M_IRQ_STATUS);
+		m_stat = geni_read32(gi2c->base, SE_GENI_M_IRQ_STATUS);
 
 		/* Check for errors */
 		if (m_stat & M_GP_IRQ_1_EN) {
 			gi2c->err = -I2C_NACK;
-			i2c_w32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
+			geni_write32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
 			return gi2c->err;
 		}
 		if (m_stat & M_GP_IRQ_3_EN) {
 			gi2c->err = -I2C_BUS_PROTO;
-			i2c_w32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
+			geni_write32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
 			return gi2c->err;
 		}
 		if (m_stat & M_GP_IRQ_4_EN) {
 			gi2c->err = -I2C_ARB_LOST;
-			i2c_w32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
+			geni_write32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
 			return gi2c->err;
 		}
 		if (m_stat & M_CMD_OVERRUN_EN) {
 			gi2c->err = -I2C_GENI_OVERRUN;
-			i2c_w32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
+			geni_write32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
 			return gi2c->err;
 		}
 		if (m_stat & M_ILLEGAL_CMD_EN) {
 			gi2c->err = -I2C_GENI_ILLEGAL_CMD;
-			i2c_w32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
+			geni_write32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
 			return gi2c->err;
 		}
 
 		/* Check for command done */
 		if (m_stat & M_CMD_DONE_EN) {
-			i2c_w32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
+			geni_write32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
 			return 0;
 		}
 	}
@@ -261,20 +123,20 @@ static int geni_i2c_tx_one_msg(struct geni_i2c_dev *gi2c, struct i2c_msg *msg,
 	u32 i, j, val;
 	const u8 *buf = msg->buf;
 	u32 len = msg->len;
-	u32 fifo_depth = geni_i2c_get_tx_fifo_depth(gi2c->base);
+	u32 fifo_depth = geni_se_get_tx_fifo_depth(gi2c->base);
 	u32 tx_wm = fifo_depth > 1 ? fifo_depth - 1 : 1;
 	u32 cur_wr = 0;
 
 	/* Set TX length */
-	i2c_w32(gi2c->base, SE_I2C_TX_TRANS_LEN, len);
+	geni_write32(gi2c->base, SE_I2C_TX_TRANS_LEN, len);
 
 	/* Issue I2C WRITE command */
 	val = (I2C_WRITE << 27) | m_param;
-	i2c_w32(gi2c->base, SE_GENI_M_CMD0, val);
+	geni_write32(gi2c->base, SE_GENI_M_CMD0, val);
 
 	/* Write data to FIFO */
 	while (cur_wr < len) {
-		u32 m_stat = i2c_r32(gi2c->base, SE_GENI_M_IRQ_STATUS);
+		u32 m_stat = geni_read32(gi2c->base, SE_GENI_M_IRQ_STATUS);
 
 		/* Check for TX FIFO watermark or any error */
 		if (m_stat & (M_TX_FIFO_WATERMARK_EN | M_CMD_DONE_EN |
@@ -282,14 +144,14 @@ static int geni_i2c_tx_one_msg(struct geni_i2c_dev *gi2c, struct i2c_msg *msg,
 
 			/* Check for errors first */
 			if (m_stat & (M_GP_IRQ_1_EN | M_GP_IRQ_3_EN | M_GP_IRQ_4_EN)) {
-				i2c_w32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
+				geni_write32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
 				gi2c->err = -I2C_NACK;
 				return gi2c->err;
 			}
 
 			/* Clear watermark IRQ */
 			if (m_stat & M_TX_FIFO_WATERMARK_EN)
-				i2c_w32(gi2c->base, SE_GENI_M_IRQ_CLEAR, M_TX_FIFO_WATERMARK_EN);
+				geni_write32(gi2c->base, SE_GENI_M_IRQ_CLEAR, M_TX_FIFO_WATERMARK_EN);
 
 			/* Write words to FIFO */
 			for (j = 0; j < tx_wm && cur_wr < len; j++) {
@@ -297,18 +159,18 @@ static int geni_i2c_tx_one_msg(struct geni_i2c_dev *gi2c, struct i2c_msg *msg,
 				for (i = 0; i < 4 && cur_wr < len; i++) {
 					val |= ((u32)buf[cur_wr++]) << (i * 8);
 				}
-				i2c_w32(gi2c->base, SE_GENI_TX_FIFOn, val);
+				geni_write32(gi2c->base, SE_GENI_TX_FIFOn, val);
 			}
 
 			/* Disable TX watermark if all data written */
 			if (cur_wr >= len) {
-				i2c_w32(gi2c->base, SE_GENI_TX_WATERMARK_REG, 0);
+				geni_write32(gi2c->base, SE_GENI_TX_WATERMARK_REG, 0);
 			}
 		}
 
 		/* Check for command done */
 		if (m_stat & M_CMD_DONE_EN) {
-			i2c_w32(gi2c->base, SE_GENI_M_IRQ_CLEAR, M_CMD_DONE_EN);
+			geni_write32(gi2c->base, SE_GENI_M_IRQ_CLEAR, M_CMD_DONE_EN);
 			break;
 		}
 	}
@@ -327,21 +189,21 @@ static int geni_i2c_rx_one_msg(struct geni_i2c_dev *gi2c, struct i2c_msg *msg,
 	u32 timeout = I2C_TIMEOUT;
 
 	/* Set RX length */
-	i2c_w32(gi2c->base, SE_I2C_RX_TRANS_LEN, len);
+	geni_write32(gi2c->base, SE_I2C_RX_TRANS_LEN, len);
 
 	/* Issue I2C READ command */
 	val = (I2C_READ << 27) | m_param;
-	i2c_w32(gi2c->base, SE_GENI_M_CMD0, val);
+	geni_write32(gi2c->base, SE_GENI_M_CMD0, val);
 
 	/* Read data from FIFO */
 	while (cur_rd < len && timeout--) {
-		u32 m_stat = i2c_r32(gi2c->base, SE_GENI_M_IRQ_STATUS);
-		u32 rx_stat = i2c_r32(gi2c->base, SE_GENI_RX_FIFO_STATUS);
-		u32 rx_wc = rx_stat & 0x1FFFFFF;  /* RX_FIFO_WC_MSK */
+		u32 m_stat = geni_read32(gi2c->base, SE_GENI_M_IRQ_STATUS);
+		u32 rx_stat = geni_read32(gi2c->base, SE_GENI_RX_FIFO_STATUS);
+		u32 rx_wc = rx_stat & RX_FIFO_WC_MSK;
 
 		/* Check for errors */
 		if (m_stat & (M_GP_IRQ_1_EN | M_GP_IRQ_3_EN | M_GP_IRQ_4_EN)) {
-			i2c_w32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
+			geni_write32(gi2c->base, SE_GENI_M_IRQ_CLEAR, m_stat);
 			gi2c->err = -I2C_NACK;
 			return gi2c->err;
 		}
@@ -349,7 +211,7 @@ static int geni_i2c_rx_one_msg(struct geni_i2c_dev *gi2c, struct i2c_msg *msg,
 		/* Read available data */
 		if (rx_wc > 0) {
 			for (i = 0; i < rx_wc && cur_rd < len; i++) {
-				val = i2c_r32(gi2c->base, SE_GENI_RX_FIFOn);
+				val = geni_read32(gi2c->base, SE_GENI_RX_FIFOn);
 				u32 j;
 				for (j = 0; j < 4 && cur_rd < len; j++) {
 					buf[cur_rd++] = (val >> (j * 8)) & 0xFF;
@@ -359,12 +221,12 @@ static int geni_i2c_rx_one_msg(struct geni_i2c_dev *gi2c, struct i2c_msg *msg,
 
 		/* Clear RX watermark and last IRQs */
 		if (m_stat & (M_RX_FIFO_WATERMARK_EN | M_RX_FIFO_LAST_EN))
-			i2c_w32(gi2c->base, SE_GENI_M_IRQ_CLEAR,
+			geni_write32(gi2c->base, SE_GENI_M_IRQ_CLEAR,
 				M_RX_FIFO_WATERMARK_EN | M_RX_FIFO_LAST_EN);
 
 		/* Check for command done */
 		if (m_stat & M_CMD_DONE_EN) {
-			i2c_w32(gi2c->base, SE_GENI_M_IRQ_CLEAR, M_CMD_DONE_EN);
+			geni_write32(gi2c->base, SE_GENI_M_IRQ_CLEAR, M_CMD_DONE_EN);
 			break;
 		}
 	}
@@ -407,25 +269,30 @@ int i2c1_init(u32 clk_freq)
 	clk_set_rate(I2C1_CLK, 19200000);
 
 	/* Check protocol type */
-	proto = i2c_r32(i2c1_dev.base, GENI_FW_REVISION_RO);
-	proto = (proto >> 8) & 0xFF;
+	proto = geni_se_read_proto(i2c1_dev.base);
 	if (proto != GENI_SE_I2C) {
 		/* Protocol not configured for I2C */
 		return -2;
 	}
 
 	/* Get FIFO depth */
-	tx_depth = geni_i2c_get_tx_fifo_depth(i2c1_dev.base);
+	tx_depth = geni_se_get_tx_fifo_depth(i2c1_dev.base);
 	if (tx_depth == 0)
 		tx_depth = 16;  /* Default */
 	tx_wm = tx_depth - 1;
 
-	/* Initialize SE */
-	geni_i2c_se_init(i2c1_dev.base, tx_wm, tx_depth);
+	/* Initialize SE using common geni_se functions */
+	geni_se_init(i2c1_dev.base, tx_wm, tx_depth);
+
+	/* Set TX watermark (required for I2C, geni_se_init only sets RX) */
+	geni_write32(i2c1_dev.base, SE_GENI_TX_WATERMARK_REG, tx_wm);
 
 	/* Configure packing: 8 bits, 4 words per FIFO entry */
-	geni_i2c_config_packing(i2c1_dev.base, BITS_PER_BYTE,
-				BYTES_PER_FIFO_WORD, true, true, true);
+	geni_se_config_packing(i2c1_dev.base, BITS_PER_BYTE,
+			       BYTES_PER_FIFO_WORD, true, true, true);
+
+	/* Select FIFO mode */
+	geni_se_select_mode(i2c1_dev.base, GENI_SE_FIFO);
 
 	/* Configure I2C timing */
 	geni_i2c_conf(&i2c1_dev);

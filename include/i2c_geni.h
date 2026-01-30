@@ -2,6 +2,7 @@
 #define __I2C_GENI_H
 
 #include <type.h>
+#include <geni_se.h>
 
 /*
  * QCOM GENI I2C driver for baremetal
@@ -13,7 +14,7 @@
  *   Interrupt: GIC_SPI 602
  */
 
-#define I2C1_BASE		0x00984000ULL
+#define I2C1_BASE		QUPV3_SE1_BASE
 
 /* I2C specific registers (offset from SE base) */
 #define SE_I2C_TX_TRANS_LEN	0x26c

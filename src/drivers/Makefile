@@ -1,3 +1,3 @@
 # src/drivers/Makefile
 
-obj-y := gpio/ uart/ clk/ i2c/
+obj-y := geni/ gpio/ uart/ clk/ i2c/
