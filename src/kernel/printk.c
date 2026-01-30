@@ -71,6 +71,27 @@ static int out_num(long n, int base,char lead,int maxwidth)
 	return outs(s);
 }
 
+static int out_num_u64(unsigned long long n, int base, char lead, int maxwidth)
+{
+	unsigned long long m = n;
+	char buf[32], *s = buf + sizeof(buf);
+	int count = 0, i = 0;
+
+	*--s = '\0';
+
+	do {
+		*--s = hex_tab[m % base];
+		count++;
+	} while ((m /= base) != 0);
+
+	if (maxwidth && count < maxwidth) {
+		for (i = maxwidth - count; i; i--)
+			*--s = lead;
+	}
+
+	return outs(s);
+}
+
 
 /*reference :   int vprintf(const char *format, va_list ap); */
 static int my_vprintf(const char *fmt, va_list ap)
@@ -85,15 +106,16 @@ static int my_vprintf(const char *fmt, va_list ap)
 				continue;
 			}
 
-		//format : %08d, %8d,%d,%u,%x,%f,%c,%s
+		//format : %08d, %8d,%d,%u,%x,%f,%c,%s,%lx,%p
 		    fmt++;
+
+		lead=' ';
+		maxwidth=0;
+
 		if(*fmt == '0'){
 			lead = '0';
 			fmt++;
 		}
-
-		lead=' ';
-		maxwidth=0;
 
 		while(*fmt >= '0' && *fmt <= '9'){
 			maxwidth *=10;
@@ -106,6 +128,23 @@ static int my_vprintf(const char *fmt, va_list ap)
 		case 'o': out_num(va_arg(ap, unsigned int),  8,lead,maxwidth); break;
 		case 'u': out_num(va_arg(ap, unsigned int), 10,lead,maxwidth); break;
 		case 'x': out_num(va_arg(ap, unsigned int), 16,lead,maxwidth); break;
+		case 'l':
+			fmt++;
+			if (*fmt == 'x') {
+				out_num_u64(va_arg(ap, unsigned long long), 16, lead, maxwidth);
+			} else if (*fmt == 'u') {
+				out_num_u64(va_arg(ap, unsigned long long), 10, lead, maxwidth);
+			} else if (*fmt == 'd') {
+				out_num_u64(va_arg(ap, long long), 10, lead, maxwidth);
+			} else {
+				outc('l');
+				outc(*fmt);
+			}
+			break;
+		case 'p':
+			outs("0x");
+			out_num_u64(va_arg(ap, unsigned long long), 16, '0', 16);
+			break;
 			case 'c': outc(va_arg(ap, int   )); break;
 			case 's': outs(va_arg(ap, char *)); break;
 

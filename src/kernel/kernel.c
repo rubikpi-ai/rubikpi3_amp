@@ -16,6 +16,7 @@
 #include <uart_geni.h>
 #include <clock.h>
 #include <clock_qcs6490.h>
+#include <i2c_geni.h>
 
 #define AMP_CMD_IDX  32
 #define AMP_CMD_RESET 0x52534554ULL /* 'RSET' */
@@ -71,18 +72,15 @@ void kernel_main(void)
 	paging_init();
 
 	uart2_init();
-//	uart2_init(115200, 19200000, 0);
 	uart2_puts("uart2 hello rubikpi 123456\n");
 
-	// clk_set_rate(UART2_CLK, 115200 * 16); /* 16x oversampling */
+	i2c1_init(I2C_STANDARD_MODE_FREQ);
+	i2c1_write(0x50, (u8 *)"Hello I2C EEPROM", 16);
 
 	gpio_pinmux_set(14, mux_gpio);
 	gpio_direction_output(14, 1);
 	gpio_pinmux_set(44, mux_gpio);
 	gpio_direction_output(44, 0);
-
-//	uart2_debug_dump_and_try_tx(shm, 200, "0123456789ABCDEF");
-	//uart2_puts("hello world\n");
 
 	gicv3_init_for_cpu();
 	enable_ppi(gicr, 27, 0x40);
