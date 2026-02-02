@@ -17,6 +17,7 @@
 #include <clock.h>
 #include <clock_qcs6490.h>
 #include <i2c_geni.h>
+#include <spi_geni.h>
 
 #define AMP_CMD_IDX  32
 #define AMP_CMD_RESET 0x52534554ULL /* 'RSET' */
@@ -74,8 +75,35 @@ void kernel_main(void)
 	uart2_init();
 	uart2_puts("uart2 hello rubikpi 123456\n");
 
-	i2c1_init(I2C_STANDARD_MODE_FREQ);
-	i2c1_write(0x50, (u8 *)"Hello I2C EEPROM", 16);
+//	i2c1_init(I2C_STANDARD_MODE_FREQ);
+//	i2c1_write(0x50, (u8 *)"Hello I2C EEPROM", 16);
+
+	/* 初始化 SPI12，最大速度 10MHz */
+	spi12_init(SPI_50MHZ);
+
+	/* 设置 SPI 模式 0 */
+	spi12_set_mode(0, SPI_MODE_0);
+
+	/* 发送数据 */
+	u8 tx_data[] = {0x01, 0x02, 0x03};
+	spi12_write(0, tx_data, sizeof(tx_data));
+
+	///* 接收数据 */
+	//u8 rx_data[4];
+	//spi12_read(0, rx_data, sizeof(rx_data));
+
+	///* 全双工传输 */
+	//u8 tx[4] = {0xAA, 0xBB, 0xCC, 0xDD};
+	//u8 rx[4];
+	//spi12_write_read(0, tx, rx, 4);
+
+	///* 先写后读（常用于读取寄存器） */
+	//u8 cmd = 0x9F;  /* JEDEC ID 命令 */
+	//u8 id[3];
+	//spi12_write_then_read(0, &cmd, 1, id, 3);
+
+	//printk("SPI12 JEDEC ID: %02X %02X %02X\n", id[0], id[1], id[2]);
+	printk("SPI12 transfer done.\n");
 
 	gpio_pinmux_set(14, mux_gpio);
 	gpio_direction_output(14, 1);

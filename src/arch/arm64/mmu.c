@@ -213,6 +213,17 @@ static void create_mmio_mapping(void)
 			0x4000, PROT_DEVICE_nGnRnE,
 			early_pgtable_alloc,
 			0);
+
+	__create_pgd_mapping((pgd_t *)idmap_pg_dir, 0x00a90000UL, 0x00a90000ULL,
+			0x4000, PROT_DEVICE_nGnRnE,
+			early_pgtable_alloc,
+			0);
+
+	/* QUPV3 Wrap1 base for SPI12/I2C12/UART12 etc. */
+	__create_pgd_mapping((pgd_t *)idmap_pg_dir, 0x00ac0000UL, 0x00ac0000ULL,
+			0x4000, PROT_DEVICE_nGnRnE,
+			early_pgtable_alloc,
+			0);
 }
 
 static void cpu_init(void)
