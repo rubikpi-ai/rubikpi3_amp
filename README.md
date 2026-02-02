@@ -1,0 +1,225 @@
+# RubikPi3 AMP (Asymmetric Multi-Processing)
+
+[中文文档](README_zh.md)
+
+Baremetal firmware for QCS6490 platform, enabling one or more CPU cores to run baremetal code while Linux runs on the remaining cores.
+
+## Features
+
+- **Multi-core Support**: Run baremetal on one or multiple CPU cores
+- **PSCI Interface**: Manage CPU cores via PSCI CPU_ON/CPU_OFF
+- **Peripheral Drivers**:
+  - UART (GENI Serial Engine)
+  - I2C (GENI Serial Engine)
+  - SPI (GENI Serial Engine)
+  - GPIO (TLMM)
+  - Clock (GCC)
+- **System Features**:
+  - GICv3 Interrupt Controller
+  - MMU Memory Management
+  - Exception Handling with Detailed Output
+  - Shared Memory Communication
+
+## Directory Structure
+
+```
+rubikpi3_amp/
+├── src/                    # Baremetal source code
+│   ├── arch/arm64/         # ARM64 architecture
+│   │   ├── boot.S          # Boot code
+│   │   ├── enter.S         # Exception vectors
+│   │   ├── mmu.c           # MMU configuration
+│   │   ├── gic_v3.c        # GICv3 driver
+│   │   └── linker.ld       # Linker script
+│   ├── kernel/             # Kernel features
+│   │   ├── kernel.c        # Main function
+│   │   ├── irq.c           # Interrupt handling
+│   │   ├── timer.c         # Timer
+│   │   └── printk.c        # Print output
+│   ├── drivers/            # Peripheral drivers
+│   │   ├── geni/           # GENI SE common module
+│   │   ├── uart/           # UART driver
+│   │   ├── i2c/            # I2C driver
+│   │   ├── spi/            # SPI driver
+│   │   ├── gpio/           # GPIO driver
+│   │   └── clk/            # Clock driver
+│   └── lib/                # Library functions
+├── include/                # Header files
+├── linux_modules/          # Linux kernel modules
+│   └── amp/                # AMP loader module
+├── tools/                  # Tools
+│   └── md/                 # Memory dump tool
+├── build/                  # Build output directory
+└── scripts/                # Build scripts
+```
+
+## Building
+
+### Prerequisites
+
+- ARM64 cross-compiler toolchain: `aarch64-linux-gnu-gcc`
+- Linux kernel source (for building kernel module)
+
+### Build Commands
+
+```bash
+# Build all (baremetal + kernel module + tools)
+make
+
+# Build only baremetal firmware
+make baremetal
+
+# Build only kernel module
+make modules
+
+# Build only tools
+make tools
+
+# Clean
+make clean
+
+# Show help
+make help
+```
+
+### Build Output
+
+```
+build/
+├── rubikpi3_amp.bin        # Baremetal firmware
+├── rubikpi3_amp.elf        # ELF file (for debugging)
+├── rubikpi3_amp.map        # Link map
+├── linux_modules/amp/
+│   └── amp.ko              # Linux kernel module
+└── tools/md/
+    └── md.q                # Memory dump tool
+```
+
+## Usage
+
+### 1. Deploy Firmware
+
+Copy `build/rubikpi3_amp.bin` to the target device's `/lib/firmware/` directory:
+
+```bash
+scp build/rubikpi3_amp.bin root@<device>:/lib/firmware/
+```
+
+### 2. Load Kernel Module
+
+```bash
+# Copy kernel module to device
+scp build/linux_modules/amp/amp.ko root@<device>:/tmp/
+
+# On the device, load module
+ssh root@<device>
+
+# Use default CPU7
+insmod /tmp/amp.ko
+
+# Or specify a single CPU
+insmod /tmp/amp.ko target_cpus=7
+
+# Or specify multiple CPUs
+insmod /tmp/amp.ko target_cpus=6,7
+```
+
+### 3. Check Status
+
+```bash
+# View debugfs status
+cat /sys/kernel/debug/ampcpu/status
+
+# View kernel log
+dmesg | grep ampcpu
+```
+
+### 4. Control Commands
+
+```bash
+# Stop baremetal and return CPU to Linux
+echo 1 > /sys/kernel/debug/ampcpu/stop
+
+# Restart baremetal
+echo 1 > /sys/kernel/debug/ampcpu/start
+
+# Send reset command
+echo 1 > /sys/kernel/debug/ampcpu/reset
+```
+
+### 5. Unload Module
+
+```bash
+# Automatically stops baremetal and returns CPU to Linux
+rmmod amp
+```
+
+## Memory Layout
+
+| Address Range | Size | Purpose |
+|--------------|------|---------|
+| 0xD0800000 - 0xD7BFFFFF | 116 MB | Code and Data |
+| 0xD7C00000 - 0xD7FFFFFF | 4 MB | Shared Memory |
+| 0xD8000000 - 0xD87FEFFF | ~8 MB | Stack |
+
+## Serial Debugging
+
+The baremetal firmware uses UART2 (SE2) for debug output by default:
+
+```bash
+# Use minicom or other serial tools on host
+./uart_debug.sh
+# or
+minicom -D /dev/ttyUSB0 -b 115200
+```
+
+## Tools
+
+### md.q - Memory Dump Tool
+
+View physical memory contents from Linux:
+
+```bash
+# Copy to device
+scp build/tools/md/md.q root@<device>:/tmp/
+
+# View shared memory (64 64-bit words)
+./md.q 0xD7C00000 64
+
+# View specified address
+./md.q <physical_address> [word_count]
+```
+
+## Development Guide
+
+### Adding New Drivers
+
+1. Create a new directory under `src/drivers/`
+2. Add source files and Makefile
+3. Add subdirectory to `src/drivers/Makefile`
+4. Add header files under `include/`
+
+### Modifying Memory Layout
+
+Edit address definitions in:
+- `src/arch/arm64/linker.ld`
+- `linux_modules/amp/amp.c`
+
+### Debugging Exceptions
+
+The baremetal firmware prints detailed information on exceptions:
+- ESR_EL1: Exception Syndrome Register
+- FAR_EL1: Fault Address Register
+- ELR_EL1: Exception Link Register
+- General registers X0-X30
+- Exception type decoding
+
+## References
+
+- [ARM Architecture Reference Manual](https://developer.arm.com/documentation/ddi0487/latest)
+- [PSCI Specification](https://developer.arm.com/documentation/den0022/latest)
+- [QCS6490 Technical Reference Manual](https://www.qualcomm.com/)
+
+## License
+
+GPL-2.0
