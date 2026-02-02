@@ -15,3 +15,9 @@ cat /sys/kernel/debug/ampcpu7/status
 
 
 0xd7c00000
+
+
+  insmod amp.ko                      # 默认使用 CPU 7
+  insmod amp.ko target_cpus=7        # 使用 CPU 7
+  insmod amp.ko target_cpus=6,7      # 使用 CPU 6 和 7
+  insmod amp.ko target_cpus=4,5,6,7  # 使用 CPU 4,5,6,7

@@ -117,7 +117,10 @@ core-y		+= src/lib/
 drivers-y	:= src/drivers/
 
 # The all: target is the default when no target is given on the command line.
-all: $(O)/rubikpi3_amp.bin
+all: $(O)/rubikpi3_amp.bin modules tools
+
+# Build only baremetal firmware
+baremetal: $(O)/rubikpi3_amp.bin
 
 KERNELRELEASE = $(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION)
 KERNELVERSION = $(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION)
@@ -210,7 +213,7 @@ clean: rm-dirs  := $(O)
 clean: rm-files :=
 
 PHONY += clean
-clean:
+clean: modules_clean tools_clean
 	$(call cmd,rmdirs)
 	@find . $(RCS_FIND_IGNORE) \
 		\( -name '*.[oas]' -o -name '.*.cmd' \
@@ -240,7 +243,10 @@ help:
 	@echo '  clean          - Remove all generated files'
 	@echo ''
 	@echo 'Build targets:'
-	@echo '  all            - Build $(O)/rubikpi3_amp.bin (default)'
+	@echo '  all            - Build everything (baremetal + modules + tools)'
+	@echo '  baremetal      - Build only $(O)/rubikpi3_amp.bin'
+	@echo '  modules        - Build Linux kernel module ($(O)/linux_modules/amp/amp.ko)'
+	@echo '  tools          - Build host tools ($(O)/tools/md/md.q)'
 	@echo ''
 	@echo 'Other targets:'
 	@echo '  version        - Show version information'
@@ -251,6 +257,34 @@ help:
 	@echo '  make V=0|1     - 0 => quiet build (default), 1 => verbose build'
 	@echo '  make V=2       - 2 => give reason for rebuild of target'
 	@echo '  make O=dir     - Build output in dir (default: build)'
+
+# ===========================================================================
+# Linux kernel module build
+# ===========================================================================
+LINUX_KDIR ?= /home/tsdl/QCOM/linux
+
+PHONY += modules
+modules:
+	@echo "  Building Linux kernel module..."
+	$(Q)$(MAKE) -C $(srctree)/linux_modules/amp KDIR=$(LINUX_KDIR) BUILD_DIR=$(objtree)/linux_modules/amp
+	@echo "  Module built: $(O)/linux_modules/amp/amp.ko"
+
+PHONY += modules_clean
+modules_clean:
+	-$(Q)$(MAKE) -C $(srctree)/linux_modules/amp clean BUILD_DIR=$(objtree)/linux_modules/amp
+
+# ===========================================================================
+# Tools build
+# ===========================================================================
+PHONY += tools
+tools:
+	@echo "  Building tools..."
+	$(Q)$(MAKE) -C $(srctree)/tools/md ARMGNU=$(patsubst %-,%,$(CROSS_COMPILE)) BUILD_DIR=$(objtree)/tools/md
+	@echo "  Tools built: $(O)/tools/md/md.q"
+
+PHONY += tools_clean
+tools_clean:
+	-$(Q)$(MAKE) -C $(srctree)/tools/md clean BUILD_DIR=$(objtree)/tools/md
 
 # FIXME Should go into a make.lib or something
 # ===========================================================================

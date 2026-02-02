@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * ampcpu7: load and start baremetal on CPU7 via PSCI CPU_ON.
- * Adds:
- *  - debugfs reset node: writes RESET command to shared memory for baremetal to PSCI CPU_OFF itself.
- *  - on rmmod: best-effort send reset command.
+ * ampcpu: load and start baremetal on multiple CPUs via PSCI CPU_ON.
+ * Supports module parameter to specify target CPUs.
+ *
+ * Usage:
+ *   insmod amp.ko                      # Use default CPU 7
+ *   insmod amp.ko target_cpus=7        # Use CPU 7
+ *   insmod amp.ko target_cpus=6,7      # Use CPUs 6 and 7
+ *   insmod amp.ko target_cpus=4,5,6,7  # Use CPUs 4,5,6,7
  */
 
 #include <linux/module.h>
@@ -20,12 +24,12 @@
 #include <linux/delay.h>
 #include <linux/debugfs.h>
 #include <asm/cacheflush.h>
-#include <asm/io.h>      // virt_to_phys
+#include <asm/io.h>
 #include <linux/kallsyms.h>
 #include <linux/firmware.h>
 
-#define DRV_NAME "ampcpu7"
-#define DEV_NAME "ampcpu7"
+#define DRV_NAME "ampcpu"
+#define DEV_NAME "ampcpu"
 #define FW_DEFAULT_NAME "rubikpi3_amp.bin"
 
 #define PSCI_0_2_FN64_CPU_ON  0xC4000003ULL
@@ -34,11 +38,24 @@
 #define AMP_CMD_IDX      32
 #define AMP_CMD_RESET    0x52534554ULL /* 'RSET' */
 
+/* Maximum number of CPUs supported */
+#define MAX_AMP_CPUS     8
+
+/* Per-CPU context */
+struct ampcpu_info {
+	int cpu;                /* logical cpu id */
+	u64 mpidr;              /* PSCI target MPIDR */
+	bool active;            /* is this CPU slot active */
+	bool was_online;        /* was CPU online before we took it */
+};
+
 struct ampcpu_ctx {
 	struct mutex lock;
 
-	int target_cpu;         /* logical cpu id, default 7 */
-	u64 mpidr;              /* PSCI target MPIDR, default 0x700 */
+	/* CPU configuration */
+	int num_cpus;                       /* number of CPUs to use */
+	struct ampcpu_info cpus[MAX_AMP_CPUS];
+
 	phys_addr_t entry_pa;   /* payload entry PA, default 0xD0800000 */
 	phys_addr_t shm_pa;     /* shared memory PA, default 0xD7C00000 */
 	size_t max_load_size;   /* payload load limit */
@@ -61,9 +78,13 @@ struct ampcpu_ctx {
 	struct dentry *dbg_dir;
 };
 
+/* Module parameters */
+static int target_cpus[MAX_AMP_CPUS] = { 7, -1, -1, -1, -1, -1, -1, -1 };
+static int target_cpus_count = 1;
+module_param_array(target_cpus, int, &target_cpus_count, 0444);
+MODULE_PARM_DESC(target_cpus, "List of target CPU IDs (default: 7)");
+
 static struct ampcpu_ctx g = {
-	.target_cpu = 7,
-	.mpidr = 0x700,
 	.entry_pa = 0xD0800000ULL,
 	.shm_pa = 0xD7C00000ULL,
 	.max_load_size = 40 * 1024 * 1024,
@@ -74,6 +95,13 @@ static struct ampcpu_ctx g = {
 
 	.fw_name = FW_DEFAULT_NAME,
 };
+
+/* Convert CPU id to MPIDR */
+static u64 cpu_to_mpidr(int cpu)
+{
+	/* For QCS6490: CPU 0-7 map to MPIDR 0x000-0x700 */
+	return (u64)cpu << 8;
+}
 
 static int psci_cpu_on(u64 mpidr, phys_addr_t entry_pa)
 {
@@ -105,18 +133,17 @@ static void amp_flush_payload(phys_addr_t pa, size_t sz)
 	memunmap(va);
 }
 
-/* best-effort: write RESET command into shared memory */
+/* Send reset command and wait for CPUs to go offline */
 static int stop_amp(void)
 {
 	void *va;
 	phys_addr_t cmd_pa;
 	u64 *p;
-	int cpu;
-	int retry;
+	int i, retry;
+	int all_offline;
 
 	mutex_lock(&g.lock);
 	cmd_pa = g.shm_pa + (phys_addr_t)(AMP_CMD_IDX * sizeof(u64));
-	cpu = g.target_cpu;
 	mutex_unlock(&g.lock);
 
 	va = memremap(cmd_pa, sizeof(u64), MEMREMAP_WB);
@@ -126,27 +153,70 @@ static int stop_amp(void)
 	p = (u64 *)va;
 	WRITE_ONCE(*p, AMP_CMD_RESET);
 
-	/* flush so CPU7 sees it */
+	/* flush so CPUs see it */
 	flush_cache_vmap((unsigned long)va, (unsigned long)va + sizeof(u64));
 
 	memunmap(va);
 
-	pr_info(DRV_NAME ": reset command sent, waiting for CPU%d to go offline...\n", cpu);
+	pr_info(DRV_NAME ": reset command sent, waiting for CPUs to go offline...\n");
 
-	/* give CPU7 more time to observe and CPU_OFF */
+	/* give CPUs time to observe and CPU_OFF */
 	msleep(100);
 
-	/* Wait for CPU to actually go offline, with timeout */
+	/* Wait for CPUs to actually go offline, with timeout */
 	for (retry = 0; retry < 50; retry++) {
-		if (!cpu_online(cpu)) {
-			pr_info(DRV_NAME ": CPU%d is now offline after %d retries\n", cpu, retry);
+		all_offline = 1;
+		mutex_lock(&g.lock);
+		for (i = 0; i < g.num_cpus; i++) {
+			if (g.cpus[i].active && cpu_online(g.cpus[i].cpu)) {
+				all_offline = 0;
+				break;
+			}
+		}
+		mutex_unlock(&g.lock);
+
+		if (all_offline) {
+			pr_info(DRV_NAME ": all CPUs offline after %d retries\n", retry);
 			return 0;
 		}
 		msleep(10);
 	}
 
-	pr_warn(DRV_NAME ": CPU%d still online after 500ms, proceeding anyway\n", cpu);
+	pr_warn(DRV_NAME ": some CPUs still online after 500ms, proceeding anyway\n");
 	return 0;
+}
+
+/* Return all CPUs to Linux */
+static int return_cpus_to_linux(void)
+{
+	int i, ret;
+	int errors = 0;
+	int cpu;
+
+	mutex_lock(&g.lock);
+	for (i = 0; i < g.num_cpus; i++) {
+		if (!g.cpus[i].active)
+			continue;
+
+		cpu = g.cpus[i].cpu;
+		mutex_unlock(&g.lock);
+
+		if (!cpu_online(cpu)) {
+			pr_info(DRV_NAME ": calling add_cpu(%d)...\n", cpu);
+			ret = add_cpu(cpu);
+			if (ret) {
+				pr_err(DRV_NAME ": add_cpu(%d) failed: %d\n", cpu, ret);
+				errors++;
+			} else {
+				pr_info(DRV_NAME ": CPU%d successfully returned to Linux\n", cpu);
+			}
+		}
+
+		mutex_lock(&g.lock);
+	}
+	mutex_unlock(&g.lock);
+
+	return errors ? -EIO : 0;
 }
 
 /* -------------------- chrdev: write payload -------------------- */
@@ -233,53 +303,51 @@ static const struct file_operations ampcpu_fops = {
 
 static ssize_t dbg_status_read(struct file *f, char __user *ubuf, size_t cnt, loff_t *ppos)
 {
-	char buf[320];
-	int len;
-	int cpu;
-	u64 mpidr;
-	u64 entry;
-	u64 shm;
-	size_t maxsz;
-	u64 loaded;
-	s64 last;
-	int boot_via_secondary;
-	u64 secondary_entry_va;
+	char *buf;
+	int len = 0;
+	int i;
+	int buf_size = 1024;
+
+	buf = kmalloc(buf_size, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
 
 	mutex_lock(&g.lock);
-	cpu = g.target_cpu;
-	mpidr = g.mpidr;
-	entry = (u64)g.entry_pa;
-	shm = (u64)g.shm_pa;
-	maxsz = g.max_load_size;
-	loaded = g.bytes_loaded;
-	last = g.last_psci_ret;
-	mutex_unlock(&g.lock);
-	boot_via_secondary = g.boot_via_secondary;
-	secondary_entry_va = g.secondary_entry_va;
 
-	len = scnprintf(buf, sizeof(buf),
-			"target_cpu=%d\n"
-			"mpidr=0x%llx\n"
+	len += scnprintf(buf + len, buf_size - len,
+			"num_cpus=%d\n", g.num_cpus);
+
+	for (i = 0; i < g.num_cpus; i++) {
+		if (!g.cpus[i].active)
+			continue;
+		len += scnprintf(buf + len, buf_size - len,
+				"cpu[%d]: id=%d mpidr=0x%llx online=%d\n",
+				i, g.cpus[i].cpu,
+				(unsigned long long)g.cpus[i].mpidr,
+				cpu_online(g.cpus[i].cpu));
+	}
+
+	len += scnprintf(buf + len, buf_size - len,
 			"entry_pa=0x%llx\n"
 			"shm_pa=0x%llx (cmd idx=%u)\n"
 			"max_load_size=0x%zx\n"
 			"bytes_loaded=0x%llx\n"
-			"cpu_online=%d (must be 0 before start)\n"
 			"last_psci_ret=%lld (0x%llx)\n"
 			"boot_via_secondary=%d\n"
 			"secondary_entry_va=0x%llx\n",
-			cpu,
-			(unsigned long long)mpidr,
-			(unsigned long long)entry,
-			(unsigned long long)shm, AMP_CMD_IDX,
-			maxsz,
-			(unsigned long long)loaded,
-			cpu_possible(cpu) ? cpu_online(cpu) : -1,
-			(long long)last, (unsigned long long)last,
-			boot_via_secondary,
-			(unsigned long long)secondary_entry_va);
+			(unsigned long long)g.entry_pa,
+			(unsigned long long)g.shm_pa, AMP_CMD_IDX,
+			g.max_load_size,
+			(unsigned long long)g.bytes_loaded,
+			(long long)g.last_psci_ret, (unsigned long long)g.last_psci_ret,
+			g.boot_via_secondary,
+			(unsigned long long)g.secondary_entry_va);
 
-	return simple_read_from_buffer(ubuf, cnt, ppos, buf, len);
+	mutex_unlock(&g.lock);
+
+	len = simple_read_from_buffer(ubuf, cnt, ppos, buf, len);
+	kfree(buf);
+	return len;
 }
 
 static phys_addr_t resolve_entry_pa(void)
@@ -296,10 +364,6 @@ static phys_addr_t resolve_entry_pa(void)
 			return 0;
 		}
 
-		/*
-		 * Convert kernel VA -> PA. This relies on linear mapping.
-		 * For secondary_entry (in kernel image) this should be OK.
-		 */
 		entry = (phys_addr_t)virt_to_phys((void *)va);
 	}
 	mutex_unlock(&g.lock);
@@ -317,41 +381,62 @@ static const struct file_operations dbg_status_fops = {
 
 static int start_amp(void)
 {
-	int cpu, ret;
-	u64 mpidr;
+	int i, ret;
 	phys_addr_t entry;
 	u64 flush_sz;
+	int started = 0;
+	int cpu;
+	u64 mpidr;
 
 	mutex_lock(&g.lock);
-	cpu = g.target_cpu;
-	mpidr = g.mpidr;
 	entry = g.entry_pa;
 	flush_sz = g.bytes_loaded ? g.bytes_loaded : 0x1000;
 	mutex_unlock(&g.lock);
 
-	if (!cpu_possible(cpu))
-		return -EINVAL;
-	if (cpu_online(cpu))
-		return -EBUSY;
-
 	amp_flush_payload(entry, (size_t)flush_sz);
 
 	entry = resolve_entry_pa();
-	ret = psci_cpu_on(mpidr, entry);
 
 	mutex_lock(&g.lock);
-	g.last_psci_ret = ret;
+	for (i = 0; i < g.num_cpus; i++) {
+		if (!g.cpus[i].active)
+			continue;
+
+		cpu = g.cpus[i].cpu;
+		mpidr = g.cpus[i].mpidr;
+
+		if (!cpu_possible(cpu)) {
+			pr_err(DRV_NAME ": CPU%d not possible\n", cpu);
+			continue;
+		}
+
+		if (cpu_online(cpu)) {
+			pr_err(DRV_NAME ": CPU%d still online, skipping\n", cpu);
+			continue;
+		}
+
+		mutex_unlock(&g.lock);
+
+		ret = psci_cpu_on(mpidr, entry);
+
+		mutex_lock(&g.lock);
+		g.last_psci_ret = ret;
+
+		pr_info(DRV_NAME ": PSCI CPU_ON cpu=%d mpidr=0x%llx entry=0x%llx ret=%d\n",
+		       cpu, (unsigned long long)mpidr, (unsigned long long)entry, ret);
+
+		if (ret == 0)
+			started++;
+	}
 	mutex_unlock(&g.lock);
 
-	pr_err(DRV_NAME ": PSCI CPU_ON mpidr=0x%llx entry=0x%llx ret=%d\n",
-	       (unsigned long long)mpidr, (unsigned long long)entry, ret);
-
-	return ret;
+	return started > 0 ? 0 : -EIO;
 }
 
 static ssize_t dbg_start_write(struct file *f, const char __user *ubuf, size_t cnt, loff_t *ppos)
 {
-	return start_amp();
+	int ret = start_amp();
+	return ret ? ret : cnt;
 }
 
 static const struct file_operations dbg_start_fops = {
@@ -364,7 +449,6 @@ static const struct file_operations dbg_start_fops = {
 static ssize_t dbg_stop_write(struct file *f, const char __user *ubuf, size_t cnt, loff_t *ppos)
 {
 	int ret;
-	int cpu;
 
 	ret = stop_amp();
 	if (ret) {
@@ -372,19 +456,12 @@ static ssize_t dbg_stop_write(struct file *f, const char __user *ubuf, size_t cn
 		return ret;
 	}
 
-	mutex_lock(&g.lock);
-	cpu = g.target_cpu;
-	mutex_unlock(&g.lock);
-
-	pr_info(DRV_NAME ": calling add_cpu(%d)...\n", cpu);
-	ret = add_cpu(cpu);
-
+	ret = return_cpus_to_linux();
 	if (ret) {
-		pr_err(DRV_NAME ": add_cpu(%d) failed: %d\n", cpu, ret);
+		pr_err(DRV_NAME ": return_cpus_to_linux failed: %d\n", ret);
 		return ret;
 	}
 
-	pr_info(DRV_NAME ": CPU%d successfully added back to Linux\n", cpu);
 	return cnt;
 }
 
@@ -431,12 +508,9 @@ static ssize_t dbg_reset_write(struct file *f, const char __user *ubuf, size_t c
 {
 	int ret;
 
-	/* send reset cmd even if cpu is online/offline; baremetal decides */
 	ret = stop_amp();
 	if (ret)
 		return ret;
-
-//	start_amp();
 
 	pr_info(DRV_NAME ": reset command sent via shm[%d]\n", AMP_CMD_IDX);
 	return cnt;
@@ -622,6 +696,72 @@ static int amp_load_firmware(void)
 	return 0;
 }
 
+/* Initialize CPU configuration from module parameters */
+static void init_cpu_config(void)
+{
+	int i;
+	int cpu;
+
+	g.num_cpus = 0;
+
+	for (i = 0; i < MAX_AMP_CPUS && i < target_cpus_count; i++) {
+		cpu = target_cpus[i];
+
+		if (cpu < 0 || cpu >= nr_cpu_ids)
+			continue;
+
+		if (!cpu_possible(cpu)) {
+			pr_warn(DRV_NAME ": CPU%d not possible, skipping\n", cpu);
+			continue;
+		}
+
+		g.cpus[g.num_cpus].cpu = cpu;
+		g.cpus[g.num_cpus].mpidr = cpu_to_mpidr(cpu);
+		g.cpus[g.num_cpus].active = true;
+		g.cpus[g.num_cpus].was_online = cpu_online(cpu);
+		g.num_cpus++;
+
+		pr_info(DRV_NAME ": configured CPU%d (mpidr=0x%llx)\n",
+			cpu, (unsigned long long)cpu_to_mpidr(cpu));
+	}
+
+	if (g.num_cpus == 0) {
+		pr_warn(DRV_NAME ": no valid CPUs configured, using default CPU7\n");
+		g.cpus[0].cpu = 7;
+		g.cpus[0].mpidr = cpu_to_mpidr(7);
+		g.cpus[0].active = true;
+		g.cpus[0].was_online = cpu_online(7);
+		g.num_cpus = 1;
+	}
+}
+
+/* Remove CPUs from Linux scheduler */
+static int remove_cpus_from_linux(void)
+{
+	int i, ret;
+	int errors = 0;
+	int cpu;
+
+	for (i = 0; i < g.num_cpus; i++) {
+		if (!g.cpus[i].active)
+			continue;
+
+		cpu = g.cpus[i].cpu;
+
+		if (cpu_online(cpu)) {
+			pr_info(DRV_NAME ": removing CPU%d from Linux...\n", cpu);
+			ret = remove_cpu(cpu);
+			if (ret) {
+				pr_err(DRV_NAME ": remove_cpu(%d) failed: %d\n", cpu, ret);
+				errors++;
+				g.cpus[i].active = false;
+			}
+		}
+	}
+
+	return errors ? -EIO : 0;
+}
+
 /* -------------------- module init/exit -------------------- */
 
 static int __init ampcpu_init(void)
@@ -629,6 +769,9 @@ static int __init ampcpu_init(void)
 	int ret;
 
 	mutex_init(&g.lock);
+
+	/* Initialize CPU configuration from module parameters */
+	init_cpu_config();
 
 	/* chrdev */
 	ret = alloc_chrdev_region(&g.devt, 0, 1, DEV_NAME);
@@ -656,11 +799,12 @@ static int __init ampcpu_init(void)
 
 	ret = amp_load_firmware();
 	if (!ret) {
-		if (cpu_online(g.target_cpu)) {
-			remove_cpu(g.target_cpu);
+		/* Remove CPUs from Linux before starting baremetal */
+		ret = remove_cpus_from_linux();
+		if (!ret) {
+			ret = start_amp();
+			pr_info(DRV_NAME ": start_amp returned %d\n", ret);
 		}
-		ret = start_amp();
-		printk("start_amp returned %d\n", ret);
 	} else {
 		pr_warn(DRV_NAME ": initial firmware load failed: %d\n", ret);
 	}
@@ -678,8 +822,6 @@ static int __init ampcpu_init(void)
 	debugfs_create_file("reset", 0200, g.dbg_dir, NULL, &dbg_reset_fops);
 	debugfs_create_file("flush", 0200, g.dbg_dir, NULL, &dbg_flush_fops);
 
-	debugfs_create_file("target_cpu", 0644, g.dbg_dir, &g.target_cpu, &dbg_int_fops);
-	debugfs_create_file("mpidr", 0644, g.dbg_dir, &g.mpidr, &dbg_u64_fops);
 	debugfs_create_file("entry_pa", 0644, g.dbg_dir, (u64 *)&g.entry_pa, &dbg_u64_fops);
 	debugfs_create_file("shm_pa", 0644, g.dbg_dir, (u64 *)&g.shm_pa, &dbg_u64_fops);
 	debugfs_create_file("max_load_size", 0644, g.dbg_dir, &g.max_load_size, &dbg_size_fops);
@@ -689,9 +831,8 @@ static int __init ampcpu_init(void)
 
 	pr_info(DRV_NAME ": /dev/%s created; debugfs: /sys/kernel/debug/%s/\n",
 		DEV_NAME, DRV_NAME);
-	pr_info(DRV_NAME ": target_cpu=%d mpidr=0x%llx entry_pa=0x%llx shm_pa=0x%llx\n",
-		g.target_cpu,
-		(unsigned long long)g.mpidr,
+	pr_info(DRV_NAME ": using %d CPU(s), entry_pa=0x%llx shm_pa=0x%llx\n",
+		g.num_cpus,
 		(unsigned long long)g.entry_pa,
 		(unsigned long long)g.shm_pa);
 
@@ -710,8 +851,19 @@ err_unregister:
 
 static void __exit ampcpu_exit(void)
 {
+	int ret;
+
 	/* best-effort reset on unload */
-	stop_amp();
+	ret = stop_amp();
+
+	if (!ret) {
+		/* Return all CPUs to Linux */
+		ret = return_cpus_to_linux();
+		if (ret)
+			pr_warn(DRV_NAME ": some CPUs failed to return to Linux\n");
+	} else {
+		pr_warn(DRV_NAME ": stop_amp failed: %d, CPUs not returned\n", ret);
+	}
 
 	debugfs_remove_recursive(g.dbg_dir);
 	device_destroy(g.class, g.devt);
@@ -719,12 +871,12 @@ static void __exit ampcpu_exit(void)
 	cdev_del(&g.cdev);
 	unregister_chrdev_region(g.devt, 1);
 
-	pr_info(DRV_NAME ": unloaded (reset cmd sent)\n");
+	pr_info(DRV_NAME ": unloaded\n");
 }
 
 module_init(ampcpu_init);
 module_exit(ampcpu_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("AMP CPU7 loader/starter via PSCI CPU_ON + debugfs reset");
-MODULE_AUTHOR("hongyang-rp + Copilot");
+MODULE_DESCRIPTION("AMP multi-CPU loader/starter via PSCI CPU_ON + debugfs");
+MODULE_AUTHOR("Hongyang Zhao <hongyang.zhao@thundersoft.com>");
