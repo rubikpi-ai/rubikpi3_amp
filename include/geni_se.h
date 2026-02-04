@@ -524,4 +524,24 @@ void geni_se_abort_m_cmd(u64 se_base);
  */
 void geni_se_cancel_m_cmd(u64 se_base);
 
+/**
+ * geni_se_setup_s_cmd() - Setup secondary sequencer command
+ * @se_base: Base address of the serial engine
+ * @opcode: Operation code for the command
+ * @params: Command parameters
+ */
+void geni_se_setup_s_cmd(u64 se_base, u32 opcode, u32 params);
+
+/**
+ * geni_se_cancel_s_cmd() - Cancel the secondary sequencer command
+ * @se_base: Base address of the serial engine
+ */
+void geni_se_cancel_s_cmd(u64 se_base);
+
+/**
+ * geni_se_abort_s_cmd() - Abort the secondary sequencer command
+ * @se_base: Base address of the serial engine
+ */
+void geni_se_abort_s_cmd(u64 se_base);
+
 #endif /* __GENI_SE_H */

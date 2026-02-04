@@ -132,6 +132,10 @@ void kernel_main(void)
 		__asm__ volatile ("wfi");
 		shm[4] = shm[4] + 1;
 
+		// 阻塞等待一个字符
+		int ch = uart2_getc();
+		uart2_putc(ch);  // 回显
+
 		/* Check for reset command from Linux */
 		if (shm[AMP_CMD_IDX] == AMP_CMD_RESET) {
 			/* Disable interrupts before CPU_OFF */

@@ -93,6 +93,14 @@ int uart2_getc_nonblock(void)
 	return (int)(r32(SE_GENI_RX_FIFOn) & 0xFF);
 }
 
+int uart2_getc(void)
+{
+	int ch;
+	while ((ch = uart2_getc_nonblock()) < 0)
+		;
+	return ch;
+}
+
 int uart2_write(const void *buf, u32 len)
 {
 	const u8 *p = (const u8 *)buf;
@@ -203,8 +211,9 @@ static void uart2_set_8n1_no_fc(void)
 
 	w32(SE_GENI_M_IRQ_CLEAR, M_CMD_DONE_EN);
 
-	/* Set the UART's internal divider. */
+	/* Set the UART's internal divider for TX (M_CLK) and RX (S_CLK) */
 	w32(GENI_SER_M_CLK_CFG, 0x41);
+	w32(GENI_SER_S_CLK_CFG, 0x41);
 }
 
 void uart2_init(void)
@@ -228,4 +237,6 @@ void uart2_init(void)
 	w32(SE_GENI_CFG_SEQ_START, START_TRIGGER);
 
 	uart2_set_8n1_no_fc();
+
+	w32(SE_GENI_S_CMD0, (UART_START_READ << S_OPCODE_SHFT));
 }

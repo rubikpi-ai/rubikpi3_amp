@@ -119,4 +119,13 @@ int uart2_write(const void *buf, u32 len);
  */
 int uart2_getc_nonblock(void);
 
+/**
+ * uart2_getc() - Blocking character read
+ *
+ * Waits until a character is available and returns it.
+ *
+ * Return: Character read (0-255)
+ */
+int uart2_getc(void);
+
 #endif /* __UART_GENI_H */

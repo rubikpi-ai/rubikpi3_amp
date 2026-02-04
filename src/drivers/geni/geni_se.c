@@ -330,3 +330,36 @@ void geni_se_abort_m_cmd(u64 se_base)
 {
 	geni_write32(se_base, SE_GENI_M_CMD_CTRL_REG, M_GENI_CMD_ABORT);
 }
+
+/**
+ * geni_se_setup_s_cmd() - Setup secondary sequencer command
+ * @se_base: Base address of the serial engine
+ * @opcode: Operation code for the command
+ * @params: Command parameters
+ *
+ * This function is used to start commands that use the secondary sequencer,
+ * such as UART RX operations.
+ */
+void geni_se_setup_s_cmd(u64 se_base, u32 opcode, u32 params)
+{
+	u32 cmd = (opcode << S_OPCODE_SHFT) | (params & S_PARAMS_MSK);
+	geni_write32(se_base, SE_GENI_S_CMD0, cmd);
+}
+
+/**
+ * geni_se_cancel_s_cmd() - Cancel the secondary sequencer command
+ * @se_base: Base address of the serial engine
+ */
+void geni_se_cancel_s_cmd(u64 se_base)
+{
+	geni_write32(se_base, SE_GENI_S_CMD_CTRL_REG, S_GENI_CMD_CANCEL);
+}
+
+/**
+ * geni_se_abort_s_cmd() - Abort the secondary sequencer command
+ * @se_base: Base address of the serial engine
+ */
+void geni_se_abort_s_cmd(u64 se_base)
+{
+	geni_write32(se_base, SE_GENI_S_CMD_CTRL_REG, S_GENI_CMD_ABORT);
+}
