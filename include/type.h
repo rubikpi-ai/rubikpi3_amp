@@ -3,6 +3,10 @@
 
 #include <errorno.h>
 
+#ifndef __ASSEMBLER__
+#include <stdint.h>
+#include <stddef.h>
+#endif
 
 #define SZ_1K	0x00000400
 #define SZ_4K	0x00001000
@@ -60,40 +64,23 @@
 
 
 #ifndef __ASSEMBLER__
-typedef char s8;
-typedef unsigned char u8;
+typedef int8_t s8;
+typedef uint8_t u8;
 
-typedef char int8_t;
-typedef unsigned char uint8_t;
+typedef int16_t s16;
+typedef uint16_t u16;
 
-typedef short s16;
-typedef unsigned short u16;
+typedef int32_t s32;
+typedef uint32_t u32;
 
-typedef short int16_t;
-typedef unsigned short uint16_t;
-
-typedef int s32;
-typedef unsigned int u32;
-
-typedef int int32_t;
-typedef unsigned int uint32_t;
-
-typedef long long s64;
-typedef unsigned long long u64;
-
-typedef long long int64_t;
-typedef unsigned long long uint64_t;
+typedef int64_t s64;
+typedef uint64_t u64;
 
 typedef unsigned long		uintptr_t;
 typedef long			intptr_t;
 
 enum bool { false = 0, true = 1 };
 typedef enum bool bool;
-
-#ifndef _SIZE_T
-#define _SIZE_T
-typedef unsigned int size_t;
-#endif
 
 typedef struct {
 	int counter;
@@ -104,7 +91,9 @@ typedef struct {
 } atomic64_t;
 #endif
 
+#ifndef offsetof
 #define offsetof(TYPE, MEMBER)	((long)&((TYPE *)0)->MEMBER)
+#endif
 
 #define min(a, b) (((a) < (b))?(a):(b))
 #define max(a, b) (((a) > (b))?(a):(b))

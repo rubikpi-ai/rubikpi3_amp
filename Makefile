@@ -81,10 +81,14 @@ OBJDUMP		= $(CROSS_COMPILE)objdump
 SIZE		= $(CROSS_COMPILE)size
 
 # Include paths
-TARGETINCLUDE   := -I$(srctree)/include
+TARGETINCLUDE   := -I$(srctree)/include \
+                   -I$(srctree)/src/freertos/include \
+                   -I$(srctree)/src/freertos/portable/GCC/ARM_AARCH64_SRE \
+                   -I$(srctree)/src/freertos \
+                   -I$(shell $(CC) -print-file-name=include)
 
 # Compiler flags
-CPPFLAGS        := -g -D__KERNEL__ $(TARGETINCLUDE)
+CPPFLAGS        := -g -D__KERNEL__ -DCONFIG_64BIT -DGUEST -DQEMU $(TARGETINCLUDE)
 CFLAGS          := -g -Wall -nostdlib -nostdinc -fno-builtin $(TARGETINCLUDE)
 AFLAGS          := -g -D__ASSEMBLY__ $(TARGETINCLUDE)
 LDFLAGS         :=
@@ -114,6 +118,7 @@ head-y		:= src/arch/arm64/boot.o
 core-y		:= src/arch/arm64/
 core-y		+= src/kernel/
 core-y		+= src/lib/
+core-y		+= src/freertos/
 drivers-y	:= src/drivers/
 
 # The all: target is the default when no target is given on the command line.

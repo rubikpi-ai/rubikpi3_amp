@@ -18,12 +18,87 @@
 #include <clock_qcs6490.h>
 #include <i2c_geni.h>
 #include <spi_geni.h>
+#include "FreeRTOS.h"
+#include "task.h"
 
 #define AMP_CMD_IDX  32
 #define AMP_CMD_RESET 0x52534554ULL /* 'RSET' */
 
 extern char _shared_memory[];
 extern char _stack_bottom[];
+
+extern void FreeRTOS_Tick_Handler(void);
+
+void vApplicationIRQHandler(uint32_t ulICCIAR)
+{
+	uint32_t ulInterruptID = ulICCIAR & 0x3FFUL;
+	volatile u64 *shm = (volatile u64 *)SHM_BASE;
+
+	shm[1]++;           /* total irq count */
+	shm[2] = ulInterruptID;     /* last intid */
+
+	if (ulInterruptID == 27) {
+		shm[3]++;       /* timer tick count */
+		FreeRTOS_Tick_Handler();
+	}
+}
+
+void vTask1(void *pvParameters)
+{
+	(void) pvParameters;
+	volatile u64 *shm = (volatile u64 *)0xD7C00000;
+
+	printk("Task1 (GPIO Toggle) started\n");
+
+	for (;;) {
+		// Toggle GPIO 44
+		gpio_direction_output(44, 0);
+		vTaskDelay(pdMS_TO_TICKS(500));
+		gpio_direction_output(44, 1);
+		vTaskDelay(pdMS_TO_TICKS(500));
+
+		shm[4]++;
+		// printk("Task1 running... tick=%d\n", xTaskGetTickCount());
+	}
+}
+
+/* Wrapper for standard sleep(seconds) behavior using FreeRTOS Delay */
+void sleep(uint32_t seconds)
+{
+	vTaskDelay(pdMS_TO_TICKS(seconds * 1000));
+}
+
+void vTask2(void *pvParameters)
+{
+	(void) pvParameters;
+	int count = 0;
+
+	printk("Task2 (Logger) started\n");
+
+	for (;;) {
+		printk("Task2: Keeping Alive... count=%d (Tick=%d)\n", count++, xTaskGetTickCount());
+		sleep(1); /* Sleep for 1 second */
+	}
+}
+
+void vTask3(void *pvParameters)
+{
+	(void) pvParameters;
+	int a = 1, b = 1;
+
+	printk("Task3 (Fibonacci) started\n");
+
+	for (;;) {
+		int next = a + b;
+		printk("Task3: Fibonacci next=%d\n", next);
+		a = b;
+		b = next;
+
+		if (a > 1000) { a = 1; b = 1; printk("Task3: Reset sequence\n"); }
+
+		sleep(2); /* Sleep for 2 seconds */
+	}
+}
 
 static inline unsigned long read_sctlr_el1(void)
 {
@@ -105,8 +180,8 @@ void kernel_main(void)
 	//printk("SPI12 JEDEC ID: %02X %02X %02X\n", id[0], id[1], id[2]);
 	printk("SPI12 transfer done.\n");
 
-	gpio_pinmux_set(14, mux_gpio);
-	gpio_direction_output(14, 1);
+	gpio_pinmux_set(44, mux_gpio);
+	gpio_direction_output(44, 1);
 	gpio_pinmux_set(44, mux_gpio);
 	gpio_direction_output(44, 0);
 
@@ -114,11 +189,11 @@ void kernel_main(void)
 	enable_ppi(gicr, 27, 0x40);
 	write_cntv_ctl_el0(0);
 
-	for (volatile u64 i = 0; i < 1000000; i++) ;
+	// for (volatile u64 i = 0; i < 1000000; i++) ;
 
-	arch_local_irq_enable();
-	timer_cntv_start_hz(1000);
-	for (volatile u64 i=0;i<5000000;i++);
+	// arch_local_irq_enable();
+	// timer_cntv_start_hz(1000);
+	// for (volatile u64 i=0;i<5000000;i++);
 
 	test[20] = 0x2020208;
 
@@ -128,6 +203,22 @@ void kernel_main(void)
 	//       read_currentel(),
 	//       read_sp());
 
+	printk("Starting FreeRTOS Scheduler...\n");
+
+	xTaskCreate(vTask1, "Task1", 1024, NULL, 1, NULL);
+	extern void vTask2(void *pvParameters);
+	xTaskCreate(vTask2, "Task2", 1024, NULL, 1, NULL);
+	extern void vTask3(void *pvParameters);
+	xTaskCreate(vTask3, "Task3", 1024, NULL, 1, NULL);
+
+	vTaskStartScheduler();
+
+	/* Should not reach here */
+	while (1) {
+		__asm__ volatile ("wfi");
+	}
+
+#if 0
 	while (1) {
 		__asm__ volatile ("wfi");
 		shm[4] = shm[4] + 1;
@@ -149,6 +240,6 @@ void kernel_main(void)
 				;
 		}
 	}
-
+#endif
 	return;
 }
