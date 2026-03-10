@@ -17,23 +17,29 @@ This document describes the process of porting FreeRTOS to the bare-metal core o
 
 ## Build System Changes
 - **Top-level Makefile**:
-  - Added `src/freertos/` to `core-y`.
-  - Added FreeRTOS include paths to `TARGETINCLUDE`.
-  - Defined `CONFIG_64BIT` and included compiler's internal include path.
+  - Added `CONFIG_FREERTOS` Kconfig option and `make menuconfig` support.
+  - Adds `src/freertos/` to `core-y` only when `CONFIG_FREERTOS=y`.
+  - Keeps bare-metal builds FreeRTOS-enabled by default when no `.config` exists.
+  - Builds `conf`/`mconf` from vendored `scripts/kconfig` sources inside this repository instead of reusing `$(LINUX_KDIR)/scripts/kconfig`.
+  - Defined `CONFIG_64BIT` and included the compiler's internal include path.
   - Defined `GUEST`: Configures FreeRTOS for EL1 execution (SVC for yield, VBAR_EL1 for vectors).
   - Defined `QEMU`: Bypasses strict interrupt priority assertions in `FreeRTOS_Tick_Handler` which may fail on some GIC implementations or emulators.
 - **Sub-Makefiles**:
-  - Created `src/freertos/Makefile` to build core FreeRTOS files and descend into portable directories.
+  - Updated `src/freertos/Makefile` so FreeRTOS-specific include paths are local to FreeRTOS objects.
+  - Updated `src/kernel/Makefile` to pass `CONFIG_FREERTOS` and the FreeRTOS include paths only to `kernel.c` when FreeRTOS is enabled.
   - Created `src/freertos/portable/GCC/ARM_AARCH64_SRE/Makefile`.
   - Created `src/freertos/portable/MemMang/Makefile`.
 
 ## Code Integration
 ### Kernel Entry (`src/kernel/kernel.c`)
-- Replaced the infinite loop in `kernel_main` with FreeRTOS initialization:
-  - Creates demo tasks.
-  - Calls `vTaskStartScheduler()`.
-- Implemented `vApplicationIRQHandler(uint32_t ulICCIAR)`:
-  - This function is called by the FreeRTOS assembly entry point when an IRQ occurs.
+- Kept `kernel_main` focused on common hardware initialization, then used `#ifdef CONFIG_FREERTOS` in the same file to choose the runtime path.
+- When `CONFIG_FREERTOS=y`, `kernel.c`:
+  - creates the demo tasks;
+  - initializes the local GIC/timer state needed by the port;
+  - calls `vTaskStartScheduler()`.
+- When `CONFIG_FREERTOS` is disabled, `kernel.c` enters a simple bare-metal polling loop.
+- `vApplicationIRQHandler(uint32_t ulICCIAR)` now lives in `kernel.c` under the `CONFIG_FREERTOS` path:
+  - It is called by the FreeRTOS assembly entry point when an IRQ occurs.
   - Checks for the tick interrupt (ID 27).
   - Calls `FreeRTOS_Tick_Handler()` for tick interrupts.
   - Updates shared memory counters.
@@ -46,8 +52,23 @@ This document describes the process of porting FreeRTOS to the bare-metal core o
 
 ### Type Definitions
 - Modified `include/type.h` to include standard headers (`stdint.h`, `stddef.h`) instead of conflicting typedefs, protecting them with `#ifndef __ASSEMBLER__`.
-- Created a wrapper `src/freertos/include/stdint.h` and `stdlib.h` to satisfy FreeRTOS dependencies using the toolchain's headers.
+- Added project-level wrapper headers (`include/stdint.h`, `include/stdlib.h`) so standard integer types remain available even when FreeRTOS support is disabled.
+
+## How to Configure
+
+```bash
+# Create a persistent default config
+make defconfig
+
+# Enable/disable FreeRTOS from the menu
+make menuconfig
+```
+
+- The configuration is stored in the project-root `.config`.
+- `make menuconfig` no longer depends on the external Linux source tree.
+- `CONFIG_FREERTOS=y` enables the FreeRTOS port and scheduler startup.
+- Disabling `CONFIG_FREERTOS` keeps the firmware buildable without pulling in the FreeRTOS sources.
 
 ## Verification
-- The project builds successfully (`make baremetal`).
-- The binary `build/rubikpi3_amp.bin` is generated.
+- `make baremetal` builds successfully with the default configuration.
+- `make menuconfig` provides a way to toggle `CONFIG_FREERTOS` from `.config`.

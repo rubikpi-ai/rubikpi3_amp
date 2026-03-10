@@ -58,11 +58,19 @@ rubikpi3_amp/
 ### 依赖
 
 - ARM64 交叉编译工具链: `aarch64-linux-gnu-gcc`
-- Linux 内核源码 (用于编译内核模块)
+- Linux 内核源码 (仅用于编译内核模块)
+- `ncurses` 开发包 (用于 `make menuconfig`)
+- `flex` 和 `bison` (用于构建仓库内置的 Kconfig host 工具)
 
 ### 构建命令
 
 ```bash
+# 生成默认 .config（可选；如果没有 .config，普通 `make` 仍默认启用 FreeRTOS）
+make defconfig
+
+# 使用菜单界面修改 .config
+make menuconfig
+
 # 构建全部 (裸机 + 内核模块 + 工具)
 make
 
@@ -86,6 +94,7 @@ make help
 
 ```
 build/
+├── kconfig/                # menuconfig 使用的主机端 Kconfig 工具
 ├── rubikpi3_amp.bin        # 裸机固件
 ├── rubikpi3_amp.elf        # ELF 文件 (用于调试)
 ├── rubikpi3_amp.map        # 链接映射
@@ -94,6 +103,14 @@ build/
 └── tools/md/
     └── md.q                # 内存 dump 工具
 ```
+
+### 配置
+
+- `make menuconfig` 会更新工程根目录下的 `.config`。
+- `make menuconfig` 现在完全使用仓库内置的 `scripts/kconfig`，不再复用 `$(LINUX_KDIR)/scripts/kconfig`。
+- `CONFIG_FREERTOS=y` 时会编译 FreeRTOS 并在裸机核心上启动调度器。
+- 关闭 `CONFIG_FREERTOS` 后，固件仍可构建，但硬件初始化完成后会进入一个简单的裸机轮询循环。
+- 如果不存在 `.config`，构建流程会保持历史默认行为：继续启用 FreeRTOS。
 
 ## 使用方法
 
@@ -168,8 +185,6 @@ rmmod amp
 
 ```bash
 # 在主机上使用 minicom 或其他串口工具
-./uart_debug.sh
-# 或
 minicom -D /dev/ttyUSB0 -b 115200
 ```
 
@@ -218,8 +233,3 @@ scp build/tools/md/md.q root@<device>:/tmp/
 
 - [ARM Architecture Reference Manual](https://developer.arm.com/documentation/ddi0487/latest)
 - [PSCI Specification](https://developer.arm.com/documentation/den0022/latest)
-- [QCS6490 Technical Reference Manual](https://www.qualcomm.com/)
-
-## 许可证
-
-GPL-2.0

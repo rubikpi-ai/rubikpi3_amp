@@ -58,11 +58,20 @@ rubikpi3_amp/
 ### Prerequisites
 
 - ARM64 cross-compiler toolchain: `aarch64-linux-gnu-gcc`
-- Linux kernel source (for building kernel module)
+- Linux kernel source (for building kernel module only)
+- `ncurses` development package (for `make menuconfig`)
+- `flex` and `bison` (for building the local Kconfig host tools)
 
 ### Build Commands
 
 ```bash
+# Generate a persistent default .config (optional; plain `make` still defaults
+# to FreeRTOS-enabled builds if .config is absent)
+make defconfig
+
+# Edit .config with a menu interface
+make menuconfig
+
 # Build all (baremetal + kernel module + tools)
 make
 
@@ -86,6 +95,7 @@ make help
 
 ```
 build/
+├── kconfig/                # Host-side Kconfig helpers for menuconfig
 ├── rubikpi3_amp.bin        # Baremetal firmware
 ├── rubikpi3_amp.elf        # ELF file (for debugging)
 ├── rubikpi3_amp.map        # Link map
@@ -94,6 +104,14 @@ build/
 └── tools/md/
     └── md.q                # Memory dump tool
 ```
+
+### Configuration
+
+- `make menuconfig` updates the project-root `.config`.
+- `make menuconfig` is self-contained in this repository and no longer reuses `$(LINUX_KDIR)/scripts/kconfig`.
+- `CONFIG_FREERTOS=y` builds and starts the FreeRTOS scheduler.
+- If `CONFIG_FREERTOS` is disabled, the firmware still builds and enters a simple bare-metal polling loop after hardware initialization.
+- If no `.config` exists, the build keeps the historical default behavior: FreeRTOS remains enabled.
 
 ## Usage
 
@@ -168,8 +186,6 @@ The baremetal firmware uses UART2 (SE2) for debug output by default:
 
 ```bash
 # Use minicom or other serial tools on host
-./uart_debug.sh
-# or
 minicom -D /dev/ttyUSB0 -b 115200
 ```
 
@@ -218,8 +234,3 @@ The baremetal firmware prints detailed information on exceptions:
 
 - [ARM Architecture Reference Manual](https://developer.arm.com/documentation/ddi0487/latest)
 - [PSCI Specification](https://developer.arm.com/documentation/den0022/latest)
-- [QCS6490 Technical Reference Manual](https://www.qualcomm.com/)
-
-## License
-
-GPL-2.0
