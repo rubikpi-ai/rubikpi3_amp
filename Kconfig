@@ -1,0 +1,3 @@
+mainmenu "RubikPi3 AMP Configuration"
+
+source "kconfig/Kconfig"

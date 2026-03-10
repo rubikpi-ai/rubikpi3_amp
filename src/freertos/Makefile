@@ -8,6 +8,10 @@ obj-y := croutine.o \
          portable/GCC/ARM_AARCH64_SRE/ \
          portable/MemMang/
 
-ccflags-y := -I$(srctree)/src/freertos/include \
-             -I$(srctree)/src/freertos/portable/GCC/ARM_AARCH64_SRE \
-             -I$(srctree)/src/freertos
+freertos-includes := -I$(srctree)/src/freertos/include \
+		     -I$(srctree)/src/freertos/portable/GCC/ARM_AARCH64_SRE \
+		     -I$(srctree)/src/freertos
+
+EXTRA_CFLAGS += $(freertos-includes)
+EXTRA_AFLAGS += $(freertos-includes)
+EXTRA_CPPFLAGS += $(freertos-includes)

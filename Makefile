@@ -68,6 +68,32 @@ MAKEFLAGS += --include-dir=$(srctree)
 # We need some generic definitions.
 include $(srctree)/scripts/Kbuild.include
 
+# External Linux tree used for module builds and Kconfig host helpers
+LINUX_KDIR ?= /home/tsdl/QCOM/linux
+
+# Project configuration
+KCONFIG_CONFIG		?= $(srctree)/.config
+KCONFIG_ROOT		:= Kconfig
+KCONFIG_DEFCONFIG	:= $(srctree)/configs/rubikpi3_amp_defconfig
+KCONFIG_BUILD_DIR	:= $(objtree)/kconfig
+KCONFIG_HOST_CONF	:= $(KCONFIG_BUILD_DIR)/conf
+KCONFIG_HOST_MCONF	:= $(KCONFIG_BUILD_DIR)/mconf
+KCONFIG_BUILD_TOOL	:= $(srctree)/scripts/build-kconfig-tools.sh
+KCONFIG_MENU_FILES	:= $(srctree)/Kconfig $(srctree)/kconfig/Kconfig
+KCONFIG_SOURCE_DIR	:= $(srctree)/scripts/kconfig
+KCONFIG_INCLUDE_DIR	:= $(srctree)/scripts/include
+KCONFIG_COMMON_SOURCES := $(srctree)/scripts/build-kconfig-tools.sh \
+			  $(wildcard $(KCONFIG_SOURCE_DIR)/*) \
+			  $(wildcard $(KCONFIG_INCLUDE_DIR)/*)
+KCONFIG_MCONF_SOURCES := $(wildcard $(KCONFIG_SOURCE_DIR)/lxdialog/*)
+
+-include $(KCONFIG_CONFIG)
+-include $(srctree)/include/config/auto.conf
+
+ifeq ($(wildcard $(KCONFIG_CONFIG) $(srctree)/include/config/auto.conf),)
+CONFIG_FREERTOS := y
+endif
+
 # Make variables (CC, etc...)
 AS		= $(CROSS_COMPILE)as
 LD		= $(CROSS_COMPILE)ld
@@ -82,9 +108,6 @@ SIZE		= $(CROSS_COMPILE)size
 
 # Include paths
 TARGETINCLUDE   := -I$(srctree)/include \
-                   -I$(srctree)/src/freertos/include \
-                   -I$(srctree)/src/freertos/portable/GCC/ARM_AARCH64_SRE \
-                   -I$(srctree)/src/freertos \
                    -I$(shell $(CC) -print-file-name=include)
 
 # Compiler flags
@@ -110,6 +133,29 @@ PHONY += scripts_basic
 scripts_basic:
 	@:
 
+PHONY += defconfig olddefconfig menuconfig
+
+$(KCONFIG_HOST_CONF): $(KCONFIG_COMMON_SOURCES)
+	$(Q)$(CONFIG_SHELL) $(KCONFIG_BUILD_TOOL) conf $@ $(HOSTCC)
+
+$(KCONFIG_HOST_MCONF): $(KCONFIG_COMMON_SOURCES) $(KCONFIG_MCONF_SOURCES)
+	$(Q)$(CONFIG_SHELL) $(KCONFIG_BUILD_TOOL) mconf $@ $(HOSTCC)
+
+defconfig: $(KCONFIG_HOST_CONF) $(KCONFIG_MENU_FILES) $(KCONFIG_DEFCONFIG)
+	@echo "  DEFCONFIG .config"
+	$(Q)cd $(srctree) && KCONFIG_CONFIG=$(KCONFIG_CONFIG) $(KCONFIG_HOST_CONF) --defconfig=$(KCONFIG_DEFCONFIG) $(KCONFIG_ROOT)
+
+olddefconfig: $(KCONFIG_HOST_CONF) $(KCONFIG_MENU_FILES)
+	@echo "  OLDDEFCONFIG .config"
+	$(Q)cd $(srctree) && KCONFIG_CONFIG=$(KCONFIG_CONFIG) $(KCONFIG_HOST_CONF) --olddefconfig $(KCONFIG_ROOT)
+
+menuconfig: $(KCONFIG_HOST_MCONF) $(KCONFIG_MENU_FILES)
+	$(Q)if [ ! -f $(KCONFIG_CONFIG) ]; then \
+		$(MAKE) defconfig; \
+	fi
+	@echo "  MENUCONFIG .config"
+	$(Q)cd $(srctree) && TERM=$${TERM:-linux} KCONFIG_CONFIG=$(KCONFIG_CONFIG) $(KCONFIG_HOST_MCONF) $(KCONFIG_ROOT)
+
 # ===========================================================================
 # Build targets only
 
@@ -118,11 +164,13 @@ head-y		:= src/arch/arm64/boot.o
 core-y		:= src/arch/arm64/
 core-y		+= src/kernel/
 core-y		+= src/lib/
+ifeq ($(CONFIG_FREERTOS),y)
 core-y		+= src/freertos/
+endif
 drivers-y	:= src/drivers/
 
 # The all: target is the default when no target is given on the command line.
-all: $(O)/rubikpi3_amp.bin modules tools
+all: baremetal modules tools
 
 # Build only baremetal firmware
 baremetal: $(O)/rubikpi3_amp.bin
@@ -238,12 +286,18 @@ info:
 	@echo "Version: $(KERNELRELEASE)"
 	@echo "Source tree: $(srctree)"
 	@echo "Build output: $(O)"
+	@echo "FreeRTOS: $(if $(filter y,$(CONFIG_FREERTOS)),enabled,disabled)"
 	@echo "Objects to build:"
 	@for obj in $(rubikpi3_amp-all); do echo "  $$obj"; done
 
 # Help target
 PHONY += help
 help:
+	@echo 'Configuration targets:'
+	@echo '  defconfig      - Create .config from $(notdir $(KCONFIG_DEFCONFIG))'
+	@echo '  olddefconfig   - Refresh existing .config with default values'
+	@echo '  menuconfig     - Update .config with a ncurses menu interface'
+	@echo ''
 	@echo 'Cleaning targets:'
 	@echo '  clean          - Remove all generated files'
 	@echo ''
@@ -262,12 +316,11 @@ help:
 	@echo '  make V=0|1     - 0 => quiet build (default), 1 => verbose build'
 	@echo '  make V=2       - 2 => give reason for rebuild of target'
 	@echo '  make O=dir     - Build output in dir (default: build)'
+	@echo '  make LINUX_KDIR=/path - Linux source tree for module builds'
 
 # ===========================================================================
 # Linux kernel module build
 # ===========================================================================
-LINUX_KDIR ?= /home/tsdl/QCOM/linux
-
 PHONY += modules
 modules:
 	@echo "  Building Linux kernel module..."

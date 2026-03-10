@@ -1,4 +1,8 @@
 build
+.config
+.config.old
+/include/config/
+/include/generated/
 rubikpi3_amp.bin
 *.map
 .*.cmd

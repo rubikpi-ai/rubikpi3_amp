@@ -1,0 +1,13 @@
+menu "Runtime support"
+
+config FREERTOS
+bool "Enable FreeRTOS support"
+default y
+help
+  Build the FreeRTOS kernel, install the FreeRTOS IRQ handling path,
+  and start the scheduler on the bare-metal core.
+
+  If disabled, the firmware still builds and enters a simple bare-metal
+  polling loop after hardware initialization.
+
+endmenu
