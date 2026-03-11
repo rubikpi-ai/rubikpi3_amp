@@ -1,5 +1,5 @@
 obj-m += amp.o
-KDIR ?= /home/tsdl/QCOM/linux/
+KDIR ?= /lib/modules/$(shell uname -r)/build
 CROSS_COMPILE := aarch64-linux-gnu-
 ARCH := arm64
 
@@ -11,6 +11,11 @@ KBUILD_INTERMEDIATES := *.ko *.o *.mod *.mod.o *.mod.c .*.cmd .*.o .*.ko \
                         .tmp_versions Module.symvers modules.order .module-common.o
 
 all: $(BUILD_DIR)
+	@if [ ! -f "$(KDIR)/Makefile" ]; then \
+		echo "error: Linux kernel build tree not found: $(KDIR)" >&2; \
+		echo "hint: invoke with 'make KDIR=/path/to/linux' or top-level 'make modules LINUX_KDIR=/path/to/linux'" >&2; \
+		exit 1; \
+	fi
 	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KDIR) M=$(CURDIR) modules
 	@cp -f $(CURDIR)/amp.ko $(BUILD_DIR)/
 	@echo "  Copied amp.ko to $(BUILD_DIR)/"

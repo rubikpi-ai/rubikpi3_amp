@@ -71,14 +71,17 @@ make defconfig
 # 使用菜单界面修改 .config
 make menuconfig
 
-# 构建全部 (裸机 + 内核模块 + 工具)
+# 默认只构建裸机固件
 make
 
 # 只构建裸机固件
 make baremetal
 
+# 构建裸机 + 内核模块 + 工具
+make full
+
 # 只构建内核模块
-make modules
+make modules LINUX_KDIR=/path/to/linux
 
 # 只构建工具
 make tools
@@ -98,10 +101,10 @@ build/
 ├── rubikpi3_amp.bin        # 裸机固件
 ├── rubikpi3_amp.elf        # ELF 文件 (用于调试)
 ├── rubikpi3_amp.map        # 链接映射
-├── linux_modules/amp/
-│   └── amp.ko              # Linux 内核模块
-└── tools/md/
-    └── md.q                # 内存 dump 工具
+├── tools/md/
+│   └── md.q                # 内存 dump 工具（仅在 `make tools`/`make full` 时生成）
+└── linux_modules/amp/
+    └── amp.ko              # Linux 内核模块（仅在 `make modules`/`make full` 时生成）
 ```
 
 ### 配置
@@ -111,6 +114,8 @@ build/
 - `CONFIG_FREERTOS=y` 时会编译 FreeRTOS 并在裸机核心上启动调度器。
 - 关闭 `CONFIG_FREERTOS` 后，固件仍可构建，但硬件初始化完成后会进入一个简单的裸机轮询循环。
 - 如果不存在 `.config`，构建流程会保持历史默认行为：继续启用 FreeRTOS。
+- 默认 `make` 只编译裸机固件；`linux_modules/` 和 `tools/` 改为按需通过 `make modules`、`make tools` 或 `make full` 构建。
+- `make modules` 支持通过 `LINUX_KDIR=/path/to/linux` 指定内核源码；未指定时回退到 `/lib/modules/$(uname -r)/build`。
 
 ## 使用方法
 
@@ -125,6 +130,9 @@ scp build/rubikpi3_amp.bin root@<device>:/lib/firmware/
 ### 2. 加载内核模块
 
 ```bash
+# 先构建内核模块
+make modules LINUX_KDIR=/path/to/linux
+
 # 复制内核模块到设备
 scp build/linux_modules/amp/amp.ko root@<device>:/tmp/
 
@@ -195,6 +203,9 @@ minicom -D /dev/ttyUSB0 -b 115200
 用于在 Linux 端查看物理内存内容:
 
 ```bash
+# 先构建工具
+make tools
+
 # 复制到设备
 scp build/tools/md/md.q root@<device>:/tmp/
 

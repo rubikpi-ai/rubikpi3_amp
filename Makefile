@@ -68,8 +68,8 @@ MAKEFLAGS += --include-dir=$(srctree)
 # We need some generic definitions.
 include $(srctree)/scripts/Kbuild.include
 
-# External Linux tree used for module builds and Kconfig host helpers
-LINUX_KDIR ?= /home/tsdl/QCOM/linux
+# External Linux tree used for module builds
+LINUX_KDIR ?=
 
 # Project configuration
 KCONFIG_CONFIG		?= $(srctree)/.config
@@ -170,7 +170,10 @@ endif
 drivers-y	:= src/drivers/
 
 # The all: target is the default when no target is given on the command line.
-all: baremetal modules tools
+all: baremetal
+
+PHONY += full
+full: baremetal modules tools
 
 # Build only baremetal firmware
 baremetal: $(O)/rubikpi3_amp.bin
@@ -302,8 +305,9 @@ help:
 	@echo '  clean          - Remove all generated files'
 	@echo ''
 	@echo 'Build targets:'
-	@echo '  all            - Build everything (baremetal + modules + tools)'
+	@echo '  all            - Build only $(O)/rubikpi3_amp.bin (default)'
 	@echo '  baremetal      - Build only $(O)/rubikpi3_amp.bin'
+	@echo '  full           - Build baremetal + modules + tools'
 	@echo '  modules        - Build Linux kernel module ($(O)/linux_modules/amp/amp.ko)'
 	@echo '  tools          - Build host tools ($(O)/tools/md/md.q)'
 	@echo ''
@@ -321,10 +325,21 @@ help:
 # ===========================================================================
 # Linux kernel module build
 # ===========================================================================
+PHONY += modules_check
+modules_check:
+	@kdir="$(if $(LINUX_KDIR),$(LINUX_KDIR),/lib/modules/$$(uname -r)/build)"; \
+	if [ ! -f "$$kdir/Makefile" ]; then \
+		echo "error: Linux kernel build tree not found: $$kdir" >&2; \
+		echo "hint: run 'make modules LINUX_KDIR=/path/to/linux'" >&2; \
+		exit 1; \
+	fi
+
 PHONY += modules
-modules:
+modules: modules_check
 	@echo "  Building Linux kernel module..."
-	$(Q)$(MAKE) -C $(srctree)/linux_modules/amp KDIR=$(LINUX_KDIR) BUILD_DIR=$(objtree)/linux_modules/amp
+	$(Q)$(MAKE) -C $(srctree)/linux_modules/amp \
+		$(if $(LINUX_KDIR),KDIR=$(LINUX_KDIR)) \
+		BUILD_DIR=$(objtree)/linux_modules/amp
 	@echo "  Module built: $(O)/linux_modules/amp/amp.ko"
 
 PHONY += modules_clean

@@ -72,14 +72,17 @@ make defconfig
 # Edit .config with a menu interface
 make menuconfig
 
-# Build all (baremetal + kernel module + tools)
+# Default build: baremetal firmware only
 make
 
 # Build only baremetal firmware
 make baremetal
 
+# Build baremetal + kernel module + tools
+make full
+
 # Build only kernel module
-make modules
+make modules LINUX_KDIR=/path/to/linux
 
 # Build only tools
 make tools
@@ -99,10 +102,10 @@ build/
 ├── rubikpi3_amp.bin        # Baremetal firmware
 ├── rubikpi3_amp.elf        # ELF file (for debugging)
 ├── rubikpi3_amp.map        # Link map
-├── linux_modules/amp/
-│   └── amp.ko              # Linux kernel module
-└── tools/md/
-    └── md.q                # Memory dump tool
+├── tools/md/
+│   └── md.q                # Memory dump tool (only when `make tools`/`make full`)
+└── linux_modules/amp/
+    └── amp.ko              # Linux kernel module (only when `make modules`/`make full`)
 ```
 
 ### Configuration
@@ -112,6 +115,8 @@ build/
 - `CONFIG_FREERTOS=y` builds and starts the FreeRTOS scheduler.
 - If `CONFIG_FREERTOS` is disabled, the firmware still builds and enters a simple bare-metal polling loop after hardware initialization.
 - If no `.config` exists, the build keeps the historical default behavior: FreeRTOS remains enabled.
+- `make` builds only the baremetal firmware by default; `linux_modules/` and `tools/` are opt-in via `make modules`, `make tools`, or `make full`.
+- `make modules` uses `LINUX_KDIR=/path/to/linux` when provided; otherwise it falls back to `/lib/modules/$(uname -r)/build`.
 
 ## Usage
 
@@ -126,6 +131,9 @@ scp build/rubikpi3_amp.bin root@<device>:/lib/firmware/
 ### 2. Load Kernel Module
 
 ```bash
+# Build the kernel module first
+make modules LINUX_KDIR=/path/to/linux
+
 # Copy kernel module to device
 scp build/linux_modules/amp/amp.ko root@<device>:/tmp/
 
@@ -196,6 +204,9 @@ minicom -D /dev/ttyUSB0 -b 115200
 View physical memory contents from Linux:
 
 ```bash
+# Build the tool first
+make tools
+
 # Copy to device
 scp build/tools/md/md.q root@<device>:/tmp/
 
