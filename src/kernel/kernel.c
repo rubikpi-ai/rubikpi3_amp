@@ -26,12 +26,29 @@
 #define AMP_CMD_RESET 0x52534554ULL
 #endif
 
+#define PSCI_0_2_FN_CPU_OFF 0x84000002UL
+#define PSCI_POWER_STATE_TYPE_POWER_DOWN (1UL << 16)
+#define AMP_CMD_IDX   32
+#define AMP_CMD_RESET 0x52534554ULL
+
 static inline unsigned long read_mpidr_el1(void)
 {
 	unsigned long v;
 
 	__asm__ volatile ("mrs %0, mpidr_el1" : "=r"(v));
 	return v;
+}
+
+static inline void psci_cpu_off(void)
+{
+	register unsigned long x0 asm("x0") = PSCI_0_2_FN_CPU_OFF;
+	register unsigned long x1 asm("x1") = PSCI_POWER_STATE_TYPE_POWER_DOWN;
+	register unsigned long x2 asm("x2") = 0;
+	register unsigned long x3 asm("x3") = 0;
+
+	asm volatile ("smc #0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x3) : "memory");
+	for (;;)
+		asm volatile ("wfi");
 }
 
 #ifdef CONFIG_FREERTOS
@@ -112,6 +129,23 @@ static void vTask3(void *pvParameters)
 	}
 }
 
+static void vTaskResetMonitor(void *pvParameters)
+{
+	volatile u64 *shm = (volatile u64 *)SHM_BASE;
+
+	(void) pvParameters;
+
+	for (;;) {
+		if (shm[AMP_CMD_IDX] == AMP_CMD_RESET) {
+			shm[AMP_CMD_IDX] = 0;
+			taskDISABLE_INTERRUPTS();
+			psci_cpu_off();
+		}
+
+		vTaskDelay(pdMS_TO_TICKS(10));
+	}
+}
+
 static void amp_runtime_prepare(void)
 {
 	u64 gicr = 0x17b40000ULL;
@@ -128,6 +162,7 @@ static void amp_runtime_start(void)
 	xTaskCreate(vTask1, "Task1", 1024, NULL, 1, NULL);
 	xTaskCreate(vTask2, "Task2", 1024, NULL, 1, NULL);
 	xTaskCreate(vTask3, "Task3", 1024, NULL, 1, NULL);
+	xTaskCreate(vTaskResetMonitor, "ResetMon", 512, NULL, 3, NULL);
 
 	vTaskStartScheduler();
 
@@ -135,15 +170,6 @@ static void amp_runtime_start(void)
 		__asm__ volatile ("yield");
 }
 #else
-static inline void psci_cpu_off(void)
-{
-	register unsigned long x0 asm("x0") = 0x84000002;
-
-	asm volatile ("smc #0" : : "r"(x0) : "memory");
-	for (;;)
-		asm volatile ("wfi");
-}
-
 static void amp_runtime_prepare(void)
 {
 }

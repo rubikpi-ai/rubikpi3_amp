@@ -88,13 +88,17 @@
 
 extern int printk(const char *fmt, ...);
 
+#define PSCI_0_2_FN_CPU_OFF 0x84000002UL
+#define PSCI_POWER_STATE_TYPE_POWER_DOWN (1UL << 16)
+
 static inline void psci_cpu_off(void)
 {
-	asm volatile(
-		"ldr x0, =0x84000002\n"
-		"smc #0\n"
-		::: "x0", "x1", "x2", "x3"
-	);
+	register unsigned long x0 asm("x0") = PSCI_0_2_FN_CPU_OFF;
+	register unsigned long x1 asm("x1") = PSCI_POWER_STATE_TYPE_POWER_DOWN;
+	register unsigned long x2 asm("x2") = 0;
+	register unsigned long x3 asm("x3") = 0;
+
+	asm volatile("smc #0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x3) : "memory");
 }
 
 /* Get exception class name string */
